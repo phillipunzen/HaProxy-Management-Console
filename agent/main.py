@@ -196,7 +196,23 @@ def certificate_meta(path, staging=False):
             'staging':staging,'path':str(path)}
 
 
+def certificate_scope_error(p):
+    directory=Path(p['cert_dir']).resolve()
+    for other in PROFILES.values():
+        if other['config_path']==p['config_path']:continue
+        other_directory=Path(other['cert_dir']).resolve()
+        if directory==other_directory or directory.is_relative_to(other_directory) or other_directory.is_relative_to(directory):
+            return 'Zertifikatsverzeichnis wird von mehreren Agent-Profilen gemeinsam verwendet. Für gezielte Zuweisung getrennte Verzeichnisse pro Profil einrichten.'
+    return None
+
+
+def require_certificate_scope(p):
+    error=certificate_scope_error(p)
+    if error:raise HTTPException(409,error)
+
+
 def install_pem(p,name,pem,staging=False):
+    require_certificate_scope(p)
     try:
         cert=x509.load_pem_x509_certificate(pem)
         key=serialization.load_pem_private_key(pem,password=None)
@@ -246,6 +262,7 @@ def certbot_args(p,body):
 
 
 def issue(p,body):
+    require_certificate_scope(p)
     cert_name,args=certbot_args(p,body)
     run(args,timeout=240)
     directory=Path(p.get('letsencrypt_dir','/etc/letsencrypt'))/'live'/cert_name
@@ -258,6 +275,7 @@ def issue(p,body):
 
 
 def renew(p):
+    require_certificate_scope(p)
     state=cert_state(p)
     entries=json.loads(state.read_text()) if state.exists() else {}
     renewed=[]
@@ -313,7 +331,7 @@ def health(): return {'status':'ok'}
 def capabilities(profile: str,p=Depends(auth)):
     return {k:v for k,v in p.items() if k in ('kind','runtime_socket_config','cert_dir_config','container','service')} | {
         'dns_providers':list(p.get('dns_providers',{})), 'http_challenge':bool(p.get('acme_webroot')),
-        'automatic_renewal':True,'config_bundle':True}
+        'automatic_renewal':True,'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
 
 @app.get('/profiles/{profile}/config-bundle')
 def config_bundle(profile: str,p=Depends(auth)):

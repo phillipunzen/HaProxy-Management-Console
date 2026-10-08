@@ -22,10 +22,10 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError,SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,InstanceMetadata,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
+from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,InstanceMetadata,Infrastructure,InstanceInfrastructure,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
 from backend import metrics as metric_store
 from backend import topology as topology_store
-from backend import basic_auth,basic_auth_api
+from backend import basic_auth,basic_auth_api,infrastructures
 from backend.settings import settings
 from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,InstanceMetadataIn,Document,DraftIn,CertificateIn,ImportedMap
 from backend.generator import generate
@@ -87,20 +87,23 @@ def instance(db,id):
     return value
 
 
-def public_instance(i,metadata=None):
+def public_instance(i,metadata=None,infrastructure=None):
     return {'id':i.id,'name':i.name,'agent_url':i.agent_url,'profile':i.profile,'kind':i.kind,'notes':i.notes,
             'allow_http':i.allow_http,'created_at':i.created_at.isoformat()+'Z',
             'tags':metadata.tags if metadata else [],'location':metadata.location if metadata else '',
-            'metadata_version':metadata.version if metadata else 0}
+            'metadata_version':metadata.version if metadata else 0,
+            'infrastructure_id':infrastructure.id if infrastructure else None,
+            'infrastructure_name':infrastructure.name if infrastructure else None}
 
 
 def store_instance_metadata(db,id,body,check_version=True):
     value=db.scalar(select(InstanceMetadata).where(InstanceMetadata.instance_id==id).with_for_update().execution_options(populate_existing=True))
     if check_version and body.metadata_version!=(value.version if value else 0):
-        raise HTTPException(409,'Tags oder Standort wurden parallel geändert. Bitte neu laden.')
+        raise HTTPException(409,'Server-Zuordnung wurde parallel geändert. Bitte neu laden.')
     if not value:value=InstanceMetadata(instance_id=id,tags=[],location='',version=0);db.add(value)
     for key in ('tags','location'):
         if key in body.model_fields_set:setattr(value,key,getattr(body,key))
+    if 'infrastructure_id' in body.model_fields_set:infrastructures.assign(db,id,body.infrastructure_id)
     if check_version:value.version+=1
     return value
 
@@ -169,6 +172,7 @@ async def lifespan(app):
 
 app=FastAPI(title='HAProxy Control',version='0.1.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 app.include_router(basic_auth_api.router(admin,operator,audit))
+app.include_router(infrastructures.router(current_user,admin,audit))
 
 SETUP_ROOT = Path(__file__).resolve().parent.parent
 
@@ -316,8 +320,9 @@ def password(body:PasswordIn,request:Request,response:Response,user=Depends(curr
 @app.get('/api/instances')
 def list_instances(user=Depends(current_user),db=Depends(get_db)):
     out=[]
-    for i,metric,metadata in db.execute(select(Instance,MetricLatest,InstanceMetadata).outerjoin(MetricLatest).outerjoin(InstanceMetadata).order_by(Instance.id)):
-        out.append(public_instance(i,metadata)|{'stats':metric.data if metric else None,'collected_at':metric.collected_at.isoformat()+'Z' if metric else None,'fresh_for_seconds':max(90,settings.metrics_interval*3)})
+    query=select(Instance,MetricLatest,InstanceMetadata,Infrastructure).outerjoin(MetricLatest,MetricLatest.instance_id==Instance.id).outerjoin(InstanceMetadata,InstanceMetadata.instance_id==Instance.id).outerjoin(InstanceInfrastructure,InstanceInfrastructure.instance_id==Instance.id).outerjoin(Infrastructure,Infrastructure.id==InstanceInfrastructure.infrastructure_id).order_by(Instance.id)
+    for i,metric,metadata,infrastructure in db.execute(query):
+        out.append(public_instance(i,metadata,infrastructure)|{'stats':metric.data if metric else None,'collected_at':metric.collected_at.isoformat()+'Z' if metric else None,'fresh_for_seconds':max(90,settings.metrics_interval*3)})
     return out
 
 @app.post('/api/instances')
@@ -329,7 +334,7 @@ def add_instance(body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
     cap=agent(i);i.kind=cap['kind']
     db.add(i);db.flush();metadata=store_instance_metadata(db,i.id,body,check_version=False)
     audit(db,user.username,'instance.created',i.name);db.commit()
-    return public_instance(i,metadata)
+    return public_instance(i,metadata,infrastructures.assignment(db,i.id))
 
 @app.put('/api/instances/{id}')
 def edit_instance(id:int,body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
@@ -341,10 +346,10 @@ def edit_instance(id:int,body:InstanceIn,user=Depends(admin),db=Depends(get_db))
     db.rollback()
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i:raise HTTPException(404,'Instanz wurde entfernt.')
-    metadata=store_instance_metadata(db,id,body) if {'tags','location'}&body.model_fields_set else db.get(InstanceMetadata,id)
+    metadata=store_instance_metadata(db,id,body) if {'tags','location','infrastructure_id'}&body.model_fields_set else db.get(InstanceMetadata,id)
     for key in ('name','agent_url','profile','allow_http','notes'): setattr(i,key,getattr(body,key))
     i.token_cipher=candidate.token_cipher;i.kind=cap['kind']
-    audit(db,user.username,'instance.updated',i.name);db.commit();return public_instance(i,metadata)
+    audit(db,user.username,'instance.updated',i.name);db.commit();return public_instance(i,metadata,infrastructures.assignment(db,id))
 
 @app.put('/api/instances/{id}/metadata')
 def edit_instance_metadata(id:int,body:InstanceMetadataIn,user=Depends(admin),db=Depends(get_db)):
@@ -355,7 +360,7 @@ def edit_instance_metadata(id:int,body:InstanceMetadataIn,user=Depends(admin),db
     if not i:raise HTTPException(404,'Instanz nicht gefunden.')
     metadata=store_instance_metadata(db,id,body)
     audit(db,user.username,'instance.metadata.updated',i.name);db.commit()
-    return public_instance(i,metadata)
+    return public_instance(i,metadata,infrastructures.assignment(db,id))
 
 @app.delete('/api/instances/{id}')
 def remove_instance(id:int,user=Depends(admin),db=Depends(get_db)):

@@ -2,9 +2,11 @@
 
 Ein HAProxy-Server kann mehrere Tags und einen Standort erhalten. Beispiele: `Prod`, `Dev`, `Staging`, `Kunde A` oder `Edge` als Tags und `Frankfurt · Rechenzentrum 1` als Standort. Weitere Zuordnungen wie Region oder Betreiber lassen sich ebenfalls als Tags verwenden.
 
+Infrastrukturen wie Firma A oder Homelab lassen sich zusätzlich zu Tags und Standorten zuweisen. Die [Anleitung für mehrere Infrastrukturen](INFRASTRUCTURES.md) erklärt den globalen Serverfilter und die gezielte Zertifikatsverwaltung.
+
 ## Zuordnungen bearbeiten
 
-Unter **Server** auf einer Serverkarte **Tags & Standort** öffnen. Tags mit Komma trennen und den optionalen Standort eingeben. **Zuordnung speichern** übernimmt die Angaben sofort in die Verwaltung. Zum Entfernen einzelne Tags aus dem Feld löschen oder das jeweilige Feld leeren.
+Unter **Server** auf einer Serverkarte **Zuordnung bearbeiten** öffnen. Tags mit Komma trennen und den optionalen Standort eingeben. **Zuordnung speichern** übernimmt die Angaben sofort in die Verwaltung. Zum Entfernen einzelne Tags aus dem Feld löschen oder das jeweilige Feld leeren.
 
 Es sind bis zu **20 Tags mit je 40 Zeichen** und ein Standort mit **120 Zeichen** möglich. Zusätzliche Leerzeichen werden entfernt und doppelte Tags unabhängig von Groß-/Kleinschreibung zusammengefasst. Tags dürfen selbst keine Kommas enthalten. `Prod`, `Dev` und `Staging` bekommen eigene Farben; alle weiteren Tags stehen ebenfalls zur Verfügung.
 

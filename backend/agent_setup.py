@@ -96,4 +96,4 @@ def build_plan(body: AgentSetupIn, origin: str, root: Path):
     host = f'[{body.host}]' if ':' in body.host else body.host
     return {'command': command, 'instance': {'name': body.name, 'agent_url': f'http://{host}:{body.port}',
             'profile': body.profile, 'token': profile['token'], 'allow_http': True, 'notes': '',
-            'tags':body.tags,'location':body.location}}
+            'tags':body.tags,'location':body.location,'infrastructure_id':body.infrastructure_id}}

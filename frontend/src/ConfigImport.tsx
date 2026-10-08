@@ -7,12 +7,12 @@ export type ImportedRoute={id:string;frontend:string;domain:string;backend:strin
 export type ImportedFields={imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[]};
 type Request=(path:string,method?:string,body?:unknown)=>Promise<any>;
 
-export function ConfigImport({id,request,onDone}:{id:number;request:Request;onDone:(doc:any)=>void}){
+export function ConfigImport({id,request,onDone,onBusy}:{onBusy?:(value:boolean)=>void;id:number;request:Request;onDone:(doc:any)=>void}){
   const [source,setSource]=useState('agent'),[config,setConfig]=useState(''),[extra,setExtra]=useState<{name:string;content:string}[]>([]),[maps,setMaps]=useState<{path:string;content:string}[]>([]);
   const [preview,setPreview]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const payload=source==='agent'?{}:{config:config+'\n'+extra.map(f=>f.content).join('\n\n'),maps};
-  async function load(){setBusy(true);setError('');try{setPreview(await request(`/instances/${id}/import-preview`,'POST',payload));}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
-  async function commit(){setBusy(true);setError('');try{onDone(await request(`/instances/${id}/import`,'POST',{...payload,active_hash:preview.active_hash,document_version:preview.document_version,preview_hash:preview.preview_hash}));}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  async function load(){onBusy?.(true);setBusy(true);setError('');try{setPreview(await request(`/instances/${id}/import-preview`,'POST',payload));}catch(e){setError((e as Error).message);}finally{setBusy(false);onBusy?.(false);}}
+  async function commit(){onBusy?.(true);setBusy(true);setError('');try{onDone(await request(`/instances/${id}/import`,'POST',{...payload,active_hash:preview.active_hash,document_version:preview.document_version,preview_hash:preview.preview_hash}));}catch(e){setError((e as Error).message);}finally{setBusy(false);onBusy?.(false);}}
   async function readFiles(files:FileList|null,kind:'config'|'extra'|'maps'){
     if(!files)return;setError('');setPreview(null);
     try{

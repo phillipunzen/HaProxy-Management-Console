@@ -1,0 +1,21 @@
+import React, { useId, useState } from 'react';
+import { Building2, Check, Plus, Server, Settings2, Trash2 } from 'lucide-react';
+
+export type Infrastructure={id:number;name:string;description:string;version:number;servers:number};
+export function InfrastructureSelect({value,items,onChange}:{value:number|null;items:Infrastructure[];onChange:(id:number|null)=>void}){
+  const id=useId();
+  return <div className="field"><label htmlFor={id}>Infrastruktur</label><select id={id} value={value??''} onChange={e=>onChange(e.target.value?Number(e.target.value):null)}><option value="">Ohne Zuordnung</option>{items.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select><small>Organisation oder Umgebung dieses Servers. Neue Gruppen unter „Infrastrukturen“ anlegen.</small></div>;
+}
+export function TargetNotice({target}:{target:{name:string;infrastructure_name?:string|null;profile:string}}){
+  return <div className="target-notice"><Server size={18}/><div><strong>Zielserver: {target.name}</strong><small>{target.infrastructure_name||'Ohne Infrastruktur-Zuordnung'} · Profil {target.profile}</small></div></div>;
+}
+export function InfrastructureManager({items,isAdmin,busy,onSave,onRemove,onOpen}:{items:Infrastructure[];isAdmin:boolean;busy:boolean;onSave:(value:{id?:number;name:string;description:string;version:number})=>Promise<void>;onRemove:(value:Infrastructure)=>void;onOpen:(id:number)=>void}){
+  const [editor,setEditor]=useState<{id?:number;name:string;description:string;version:number}|null>(null);
+  const id=useId();
+  return <><div className="notice"><Building2 size={20}/><span>Gruppiere Server verschiedener Organisationen oder Umgebungen. Zertifikate, Hosts, Regeln und Listener werden auf dem ausdrücklich ausgewählten Server verwaltet. Benutzerrollen gelten für die gesamte Management-Oberfläche.</span></div>
+    {isAdmin&&!editor&&<div className="toolbar"><button className="button" disabled={busy} onClick={()=>setEditor({name:'',description:'',version:0})}><Plus size={16}/>Infrastruktur hinzufügen</button></div>}
+    {editor&&<section className="panel"><form className="form-body" onSubmit={async e=>{e.preventDefault();try{await onSave(editor);setEditor(null);}catch{/* The application reports the error; retain the form. */}}}><h2>{editor.id?'Infrastruktur bearbeiten':'Infrastruktur hinzufügen'}</h2><div className="field"><label htmlFor={id+'-name'}>Name der Infrastruktur</label><input id={id+'-name'} autoFocus required maxLength={120} placeholder="z. B. Firma A oder Homelab" value={editor.name} onChange={e=>setEditor({...editor,name:e.target.value})}/></div><div className="field"><label htmlFor={id+'-description'}>Beschreibung</label><textarea id={id+'-description'} maxLength={500} rows={2} value={editor.description} onChange={e=>setEditor({...editor,description:e.target.value})}/></div><div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={()=>setEditor(null)}>Abbrechen</button><button type="submit" className="button" disabled={busy}><Check size={16}/>Infrastruktur speichern</button></div></form></section>}
+    <div className="server-cards">{items.map(i=><section key={i.id} className="panel server-card"><div className="server-card-top"><span className="tile-icon"><Building2 size={24}/></span><span className="badge neutral">{i.servers} Server</span></div><h2>{i.name}</h2><p>{i.description||'Keine Beschreibung'}</p><div className="server-card-actions"><button className="button secondary" disabled={busy} onClick={()=>onOpen(i.id)}>Server anzeigen</button>{isAdmin&&<><button className="icon-button" aria-label={'Infrastruktur '+i.name+' bearbeiten'} disabled={busy} onClick={()=>setEditor({...i})}><Settings2 size={17}/></button><button className="icon-button red-text" aria-label={'Infrastruktur '+i.name+' löschen'} title={i.servers?'Zuerst Server-Zuordnungen entfernen':'Infrastruktur löschen'} disabled={busy||i.servers>0} onClick={()=>onRemove(i)}><Trash2 size={17}/></button></>}</div></section>)}</div>
+    {!items.length&&!editor&&<section className="panel"><div className="empty"><Building2 size={30}/><h3>Deine Infrastrukturen</h3><p>Lege eine Gruppe an und ordne ihr bestehende Server über „Zuordnung bearbeiten“ oder neue Server im Einrichtungsassistenten zu.</p></div></section>}
+  </>;
+}

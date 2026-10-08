@@ -1,10 +1,11 @@
 import React, { useId, useRef, useState } from 'react';
 import { Check, CheckCircle2, ChevronLeft, Copy, Loader2, Server, Terminal } from 'lucide-react';
 
+import type { Infrastructure } from './Infrastructures';
 import { ClassificationFields } from './ServerDirectory';
 
 type Kind = 'native' | 'docker';
-type Plan = {command:string; instance:{name:string;agent_url:string;profile:string;token:string;allow_http:boolean;notes:string;tags:string[];location:string}};
+type Plan = {command:string; instance:{name:string;agent_url:string;profile:string;token:string;allow_http:boolean;notes:string;tags:string[];location:string;infrastructure_id:number|null}};
 const paths = (kind:Kind) => kind === 'native'
   ? {profile:'native',config_path:'/etc/haproxy/haproxy.cfg',runtime_socket:'/run/haproxy/admin.sock',cert_dir:'/etc/haproxy/certs'}
   : {profile:'docker-edge',config_path:'/opt/haproxy/config/haproxy.cfg',runtime_socket:'/opt/haproxy/run/admin.sock',cert_dir:'/opt/haproxy/certs'};
@@ -13,13 +14,14 @@ function Input({label,hint,...props}:React.InputHTMLAttributes<HTMLInputElement>
   return <div className="field"><label htmlFor={id}>{label}</label><input id={id} {...props}/>{hint&&<small>{hint}</small>}</div>;
 }
 
-export function AgentSetupWizard({request,onConnected,onExisting}:{
+export function AgentSetupWizard({request,onConnected,onExisting,infrastructures=[],defaultInfrastructure=null}:{
+  infrastructures?:Infrastructure[];defaultInfrastructure?:number|null;
   request:(path:string,method?:string,body?:unknown)=>Promise<any>;
   onConnected:()=>Promise<void>;
   onExisting:()=>void;
 }) {
   const [step,setStep]=useState(0), [busy,setBusy]=useState(false), [error,setError]=useState(''), [copied,setCopied]=useState(false);
-  const [value,setValue]=useState({tags:[] as string[],location:'',name:'',kind:'native' as Kind,host:'',port:9101,service:'haproxy',container:'haproxy',
+  const [value,setValue]=useState({infrastructure_id:defaultInfrastructure,tags:[] as string[],location:'',name:'',kind:'native' as Kind,host:'',port:9101,service:'haproxy',container:'haproxy',
     container_config_dir:'/usr/local/etc/haproxy',runtime_socket_config:'/run/haproxy/admin.sock',cert_dir_config:'/etc/haproxy/certs',allow_http:false,...paths('native')});
   const [plan,setPlan]=useState<Plan|null>(null);
   const commandRef=useRef<HTMLTextAreaElement>(null);
@@ -39,7 +41,7 @@ export function AgentSetupWizard({request,onConnected,onExisting}:{
       <h3>Wie läuft HAProxy auf diesem Host?</h3><p className="wizard-intro">Der Assistent erstellt einen Installationsbefehl für einen vorhandenen HAProxy auf Debian oder Ubuntu mit systemd.</p>
       <div className="wizard-kind">{(['native','docker'] as Kind[]).map(kind=><button key={kind} type="button" className={value.kind===kind?'selected':''} aria-pressed={value.kind===kind} onClick={()=>setValue(old=>({...old,kind,...paths(kind)}))}><Server size={22}/><strong>{kind==='native'?'Nativ installiert':'Docker-Container'}</strong><span>{kind==='native'?'Dienst über systemd verwalten':'Agent auf dem Docker-Host installieren'}</span></button>)}</div>
       <Input label="Name in der Management-Oberfläche" required maxLength={120} placeholder="z. B. Edge Frankfurt" value={value.name} onChange={e=>update('name',e.target.value)}/>
-      <ClassificationFields value={value} onChange={next=>setValue({...value,...next})}/>
+      <ClassificationFields infrastructures={infrastructures} value={value} onChange={next=>setValue({...value,...next})}/>
       <div className="modal-actions"><button type="button" className="button secondary" onClick={onExisting}>Agent bereits installiert</button><button type="submit" className="button">Weiter</button></div>
     </form>}
     {step===1&&<form onSubmit={e=>{e.preventDefault();void generate();}}>
@@ -56,7 +58,7 @@ export function AgentSetupWizard({request,onConnected,onExisting}:{
       <textarea ref={commandRef} className="wizard-command" aria-label="Installationsbefehl" readOnly rows={5} value={plan.command} onClick={e=>e.currentTarget.select()}/>
       <button type="button" className="button secondary" onClick={()=>void copy()}>{copied?<CheckCircle2 size={16}/>:<Copy size={16}/>} {copied?'Befehl kopiert':'Befehl kopieren'}</button>
       <div className="notice"><Terminal size={18}/><span>Der Befehl enthält den neuen Agent-Token. Nach erfolgreicher Ausführung Port {value.port} für den Management-Host freigeben und unten die Verbindung prüfen. Lass diesen Dialog bis zum Verbinden geöffnet.</span></div>
-      <dl className="wizard-summary"><div><dt>Agent-Adresse</dt><dd>{plan.instance.agent_url}</dd></div><div><dt>Profil</dt><dd>{plan.instance.profile}</dd></div><div><dt>Installation</dt><dd>{value.kind==='native'?'Nativ':'Docker'}</dd></div></dl>
+      <dl className="wizard-summary"><div><dt>Infrastruktur</dt><dd>{infrastructures.find(i=>i.id===plan.instance.infrastructure_id)?.name||'Ohne Zuordnung'}</dd></div><div><dt>Agent-Adresse</dt><dd>{plan.instance.agent_url}</dd></div><div><dt>Profil</dt><dd>{plan.instance.profile}</dd></div><div><dt>Installation</dt><dd>{value.kind==='native'?'Nativ':'Docker'}</dd></div></dl>
       <p className="wizard-intro">Wenn der Dialog geschlossen wurde, lässt sich der installierte Agent mit Profilname und Token aus <code>/etc/haproxy-control/agent.json</code> über „Agent bereits installiert“ verbinden. <a href="/api/agent-guide" target="_blank" rel="noreferrer">Vollständige Anleitung</a></p>
       <div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={()=>{setPlan(null);setStep(1);}}>Angaben ändern</button><button type="button" className="button" disabled={busy} onClick={()=>void connect()}>{busy?<Loader2 size={16} className="spin"/>:<CheckCircle2 size={16}/>}Verbindung prüfen & speichern</button></div>
     </>}

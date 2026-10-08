@@ -61,6 +61,7 @@ class InstanceMetadataIn(BaseModel):
     tags: list[str] = Field(default_factory=list,max_length=20)
     location: str = Field(default='',max_length=120)
     metadata_version: int = Field(default=0,ge=0)
+    infrastructure_id: int | None = Field(default=None,ge=1)
 
     @field_validator('tags')
     @classmethod
@@ -80,6 +81,18 @@ class InstanceMetadataIn(BaseModel):
     def valid_location(cls,value):
         if any(unicodedata.category(c).startswith('C') for c in value):raise ValueError('Standort darf keine Steuerzeichen enthalten.')
         return unicodedata.normalize('NFC',' '.join(value.split()))
+
+class InfrastructureIn(BaseModel):
+    name: str = Field(min_length=1,max_length=120)
+    description: str = Field(default='',max_length=500)
+    version: int = Field(default=0,ge=0)
+
+    @field_validator('name')
+    @classmethod
+    def name_ok(cls,value):
+        value=InstanceMetadataIn.valid_location(value)
+        if not value:raise ValueError('Bitte einen Namen für die Infrastruktur angeben.')
+        return value
 
 class InstanceIn(InstanceMetadataIn):
     name: str = Field(min_length=1, max_length=120)

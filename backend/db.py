@@ -75,6 +75,19 @@ class Instance(Base):
     document_version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
+class Infrastructure(Base):
+    __tablename__ = 'infrastructures'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    name_key: Mapped[str] = mapped_column(String(360),unique=True)
+    description: Mapped[str] = mapped_column(String(500),default='')
+    version: Mapped[int] = mapped_column(Integer,default=0)
+
+class InstanceInfrastructure(Base):
+    __tablename__ = 'instance_infrastructures'
+    instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id',ondelete='CASCADE'),primary_key=True)
+    infrastructure_id: Mapped[int] = mapped_column(ForeignKey('infrastructures.id',ondelete='RESTRICT'),index=True)
+
 class InstanceMetadata(Base):
     __tablename__ = 'instance_metadata'
     instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id',ondelete='CASCADE'),primary_key=True)

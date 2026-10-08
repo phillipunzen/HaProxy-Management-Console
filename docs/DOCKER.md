@@ -119,3 +119,7 @@ Neue Messungen speichern nur kompakte globale Werte. Die alte Tabelle `metrics` 
 ## Live-Topologie
 
 Unter **Topologie** stehen Sites, TCP-Dienste, Backend-Pools und Zielserver als interaktives Diagramm bereit. Animierte Verbindungen zeigen gemessene Aktivität bzw. aktive Sessions, mit Suche, Filtern und Details. Die Ansicht speichert keine zusätzlichen Metriken. Messgrenzen und Bedienung: [TOPOLOGY.md](TOPOLOGY.md).
+
+## Mehrere Infrastrukturen
+
+Unter **Infrastrukturen** Gruppen anlegen und Server unter **Server → Zuordnung bearbeiten** zuweisen. Zertifikate und Konfigurationen gehören zur ausgewählten HAProxy-Instanz. Die [Anleitung im Paket](docs/INFRASTRUCTURES.md) beschreibt getrennte Zertifikatsverzeichnisse, Cloudflare-Konten und die Auswahl des Zielservers. [Anleitung auf GitHub](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/INFRASTRUCTURES.md). Bestehende Installationen benötigen keine neuen ENV-Variablen.

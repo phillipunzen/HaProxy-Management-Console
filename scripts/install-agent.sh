@@ -69,6 +69,10 @@ if name in existing['profiles']:
 for current in existing['profiles'].values():
     if current['config_path'] == p['config_path'] or current['runtime_socket'] == p['runtime_socket']:
         raise SystemExit('Diese HAProxy-Datei bzw. dieser Socket wird bereits von einem Agent-Profil verwaltet.')
+    if current.get('cert_dir'):
+        certificate_dir, other_dir = Path(p['cert_dir']).resolve(), Path(current['cert_dir']).resolve()
+        if certificate_dir == other_dir or certificate_dir.is_relative_to(other_dir) or other_dir.is_relative_to(certificate_dir):
+            raise SystemExit('Ein eigenes Zertifikatsverzeichnis pro Agent-Profil verwenden; gemeinsam genutzte oder ineinander liegende Verzeichnisse sind nicht isoliert.')
 
 if p['kind'] == 'docker':
     mounts = json.loads(agent.run(['docker', 'inspect', '--format', '{{json .Mounts}}', p['container']]))

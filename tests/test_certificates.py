@@ -60,3 +60,27 @@ def test_webroot_serves_only_challenge_tokens(tmp_path,monkeypatch):
         assert client.get('/private.key').status_code==404
         assert client.get('/.well-known/acme-challenge/no-such-token').status_code==404
         assert client.get('/.well-known/acme-challenge/%2E%2E%2Fprivate.key').status_code==404
+
+@pytest.mark.parametrize('alias',['same','nested','symlink'])
+def test_shared_certificate_directory_blocks_writes(tmp_path,monkeypatch,alias):
+    directory=tmp_path/'certs';directory.mkdir()
+    other_directory=directory if alias=='same' else directory/'child'
+    if alias=='symlink':
+        other_directory=tmp_path/'alias';other_directory.symlink_to(directory,target_is_directory=True)
+    p={'config_path':str(tmp_path/'a.cfg'),'cert_dir':str(directory)}
+    q={'config_path':str(tmp_path/'b.cfg'),'cert_dir':str(other_directory)}
+    monkeypatch.setattr(a,'PROFILES',{'a':p,'b':q})
+    monkeypatch.setattr(a,'run',lambda *args,**kw:pytest.fail('Shared directory must not invoke Certbot or reload'))
+    assert a.certificate_scope_error(p) and a.certificate_scope_error(q)
+    body=CertificateIn(name='x',domains=['example.com'],email='admin@example.com',challenge='http')
+    for fn in (lambda:a.issue(p,body),lambda:a.install_pem(p,'x',b'invalid'),lambda:a.renew(p)):
+        with pytest.raises(HTTPException) as error:fn()
+        assert error.value.status_code==409
+    assert list(directory.iterdir())==[]
+
+
+def test_separate_certificate_directories_allow_identical_names(tmp_path,monkeypatch):
+    p={'config_path':str(tmp_path/'a.cfg'),'cert_dir':str(tmp_path/'certs-a')}
+    q={'config_path':str(tmp_path/'b.cfg'),'cert_dir':str(tmp_path/'certs-b')}
+    monkeypatch.setattr(a,'PROFILES',{'a':p,'b':q})
+    assert a.certificate_scope_error(p) is None and a.certificate_scope_error(q) is None

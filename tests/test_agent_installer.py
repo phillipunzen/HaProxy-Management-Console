@@ -73,3 +73,10 @@ def test_missing_docker_mount_stops_before_changing_config(setup,monkeypatch):
     monkeypatch.setattr(agent,'run',lambda *args,**kw:'[]')
     with pytest.raises(SystemExit,match='Docker-Verzeichnis-Mount fehlt'):execute()
     assert config.read_text()==original and not profile_file.exists()
+
+
+def test_shared_certificate_directory_rejected_before_config_change(setup):
+    execute,p,config,original,profile_file,calls=setup
+    profile_file.parent.mkdir();profile_file.write_text(json.dumps({'profiles':{'other':{'token':'keep','config_path':'/other.cfg','runtime_socket':'/other.sock','cert_dir':p['cert_dir']}}}))
+    with pytest.raises(SystemExit,match='eigenes Zertifikatsverzeichnis'):execute()
+    assert config.read_text()==original and not calls
