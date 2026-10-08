@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+ADMIN-ZUGANG.txt
+.venv/
+__pycache__/
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+agent/config.json
+agent/state/
+lab/
+*.pem
+*.key
+*.ini
