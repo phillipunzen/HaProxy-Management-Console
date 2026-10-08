@@ -155,7 +155,7 @@ def api():
     def get_db():
         with factory() as db:yield db
     main.app.dependency_overrides[main.get_db]=get_db
-    client=TestClient(main.app)
+    client=TestClient(main.app,base_url='https://testserver')
     response=client.post('/api/auth/login',json={'username':'admin','password':PASSWORD});assert response.status_code==200
     client.headers['X-CSRF-Token']=response.json()['csrf']
     yield client,factory
@@ -203,7 +203,7 @@ def test_api_permissions_csrf_and_management_login_separation(api):
     assert client.post('/api/basic-auth/groups',json={'name':'Unsafe'}).status_code==403
     client.headers['X-CSRF-Token']=csrf
     assert client.post('/api/basic-auth/groups',json={'name':'Unsafe'},headers={'Origin':'https://evil.example'}).status_code==403
-    outsider=TestClient(main.app)
+    outsider=TestClient(main.app,base_url='https://testserver')
     assert outsider.get('/api/basic-auth').status_code==401
     assert outsider.post('/api/auth/login',json={'username':'alice','password':PASSWORD}).status_code==401
     for role in ('operator','viewer'):
