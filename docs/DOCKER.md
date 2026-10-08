@@ -9,10 +9,12 @@ Archiv entpacken und in das Verzeichnis `haproxy-management` wechseln:
 ```bash
 cp .env.example .env
 chmod 600 .env
-docker compose -f docker-compose.yml pull
+docker pull ghcr.io/phillipunzen/haproxy-management-console:latest
 ```
 
-Zufällige Werte für die drei Geheimnisse erzeugen; dafür wird keine lokale Python-Installation benötigt:
+## Schlüssel und Startpasswort erzeugen
+
+Für eine **neue Installation** zufällige Werte für `ENCRYPTION_KEY`, `SESSION_SECRET` und `ADMIN_PASSWORD` erzeugen; dafür wird keine lokale Python-Installation benötigt:
 
 ```bash
 docker run --rm --network none --entrypoint python \
@@ -20,7 +22,13 @@ docker run --rm --network none --entrypoint python \
   -c 'import secrets; from cryptography.fernet import Fernet; print("ENCRYPTION_KEY=" + Fernet.generate_key().decode()); print("SESSION_SECRET=" + secrets.token_urlsafe(48)); print("ADMIN_PASSWORD=" + secrets.token_urlsafe(24))'
 ```
 
-Die erzeugten Werte in `.env` übernehmen. MariaDB-Zugangsdaten eintragen und `APP_ORIGIN` auf die tatsächliche Browser-Adresse setzen, z. B. `http://192.168.10.70:8100`. Danach:
+Die drei ausgegebenen Zeilen **anstelle der vorhandenen Platzhalter** in `.env` übernehmen. Der Befehl zeigt neue Werte an und ändert keine Dateien. `ENCRYPTION_KEY` ist ein gültiger Fernet-Schlüssel, `SESSION_SECRET` hat mindestens 32 Zeichen und `ADMIN_PASSWORD` mindestens 14 Zeichen. `.env` geschützt sichern; bei Updates oder Wiederverwendung der Datenbank die vorhandenen Schlüssel behalten. Ohne den ursprünglichen `ENCRYPTION_KEY` lassen sich gespeicherte Agent-Tokens nicht mehr entschlüsseln.
+
+MariaDB-Zugangsdaten eintragen und `APP_ORIGIN` auf die tatsächliche Browser-Adresse setzen, z. B. `http://192.168.10.70:8100`.
+
+## Container starten
+
+Danach:
 
 ```bash
 docker compose -f docker-compose.yml config --quiet

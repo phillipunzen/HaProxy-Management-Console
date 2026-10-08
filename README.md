@@ -12,10 +12,33 @@ Eine fertige `docker-compose.yml` mit expliziten ENV-Variablen liegt im Reposito
 git clone https://github.com/phillipunzen/HaProxy-Management-Console.git
 cd HaProxy-Management-Console
 cp .env.example .env
-# .env mit eigener MariaDB-Verbindung, Schlüsseln und Startpasswort ausfüllen.
 chmod 600 .env
-docker compose -f compose.registry.yaml pull
-docker compose -f compose.registry.yaml up -d
+docker pull ghcr.io/phillipunzen/haproxy-management-console:latest
+```
+
+### Schlüssel und Startpasswort erzeugen
+
+Für eine **neue Installation** erzeugt dieser Befehl `ENCRYPTION_KEY`, `SESSION_SECRET` und `ADMIN_PASSWORD`. Er verwendet Python aus dem fertigen Image; auf dem Host muss nur Docker installiert sein:
+
+```bash
+docker run --rm --network none --entrypoint python \
+  ghcr.io/phillipunzen/haproxy-management-console:latest \
+  -c 'import secrets; from cryptography.fernet import Fernet; print("ENCRYPTION_KEY=" + Fernet.generate_key().decode()); print("SESSION_SECRET=" + secrets.token_urlsafe(48)); print("ADMIN_PASSWORD=" + secrets.token_urlsafe(24))'
+```
+
+Die drei ausgegebenen Zeilen **anstelle der vorhandenen Platzhalter** in `.env` eintragen. Der Befehl zeigt neue Werte an und ändert keine Dateien. Zusätzlich MariaDB-Zugangsdaten und `APP_ORIGIN` ausfüllen.
+
+- `ENCRYPTION_KEY`: gültiger Fernet-Schlüssel für die Verschlüsselung gespeicherter Agent-Tokens.
+- `SESSION_SECRET`: zufälliger Sitzungsschlüssel; mindestens 32 Zeichen.
+- `ADMIN_PASSWORD`: zufälliges Passwort des ersten Administrators; mindestens 14 Zeichen.
+
+`.env` geschützt sichern und die Schlüssel bei Updates oder Neuinstallation mit derselben Datenbank beibehalten. Ohne den ursprünglichen `ENCRYPTION_KEY` lassen sich gespeicherte Agent-Tokens nicht mehr entschlüsseln. `ADMIN_PASSWORD` erzeugt nur den ersten Benutzer; bestehende Passwörter werden in der Weboberfläche geändert.
+
+Anschließend starten:
+
+```bash
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml up -d
 ```
 
 Die Oberfläche ist standardmäßig unter `http://<server-ip>:8100` erreichbar. `APP_ORIGIN` in `.env` muss auf genau diese Adresse zeigen. Mit `ADMIN_USERNAME` und `ADMIN_PASSWORD` anmelden und beim ersten Login ein persönliches Passwort setzen. Voraussetzungen und Agent-Einrichtung stehen unten.
@@ -47,7 +70,7 @@ Für Updates `docker compose -f compose.registry.yaml pull` und danach `docker c
 
 Voraussetzungen: Docker mit Compose und eine erreichbare MariaDB (11.x getestet).
 
-1. `.env.example` nach `.env` kopieren, Zugangsdaten und `APP_ORIGIN` setzen. Passwörter und Schlüssel zufällig erzeugen. `ENCRYPTION_KEY` ist ein Fernet-Key; `SESSION_SECRET` mindestens 32 zufällige Zeichen; `ADMIN_PASSWORD` mindestens 14 Zeichen. `.env` auf Modus 0600 setzen.
+1. `.env.example` nach `.env` kopieren, Zugangsdaten und `APP_ORIGIN` setzen. Schlüssel und Startpasswort mit dem Befehl unter [Schlüssel und Startpasswort erzeugen](#schlüssel-und-startpasswort-erzeugen) erstellen und die Platzhalter ersetzen. `.env` auf Modus 0600 setzen.
 2. Datenbank vorab erstellen. Der Benutzer benötigt Zugriff auf die Anwendungstabellen sowie bei Erststart `CREATE`/`INDEX`/`REFERENCES`. Die Anwendung führt keine Drops oder Änderungen an fremden Tabellen aus. Eine eigene Datenbank wird empfohlen.
 3. `docker compose -f compose.registry.yaml up -d` für das veröffentlichte Image oder `docker compose up -d --build` für einen lokalen Build.
 4. Mit dem Bootstrap-Benutzer anmelden und Passwort ändern. Bootstrap-Werte erzeugen einen Benutzer nur, wenn noch kein Benutzer existiert.
