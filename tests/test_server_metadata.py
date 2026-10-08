@@ -68,7 +68,8 @@ def test_metadata_permissions_and_csrf(api):
     assert client.put('/api/instances/1/metadata',json={'tags':['Prod']}).status_code==403
     client.headers['X-CSRF-Token']=csrf
     assert client.put('/api/instances/1/metadata',json={},headers={'Origin':'https://evil.example'}).status_code==403
-    with TestClient(main.app,base_url='https://testserver') as outsider:
+    outsider=TestClient(main.app,base_url='https://testserver')
+    try:
         assert outsider.get('/api/instances').status_code==401
         assert outsider.put('/api/instances/1/metadata',json={}).status_code==401
         for role in ('operator','viewer'):
@@ -76,6 +77,7 @@ def test_metadata_permissions_and_csrf(api):
             outsider.headers['X-CSRF-Token']=login.json()['csrf']
             assert outsider.get('/api/instances').status_code==200
             assert outsider.put('/api/instances/1/metadata',json={'tags':['Prod']}).status_code==403
+    finally:outsider.close()
 
 def test_metadata_deleted_with_instance(api):
     client,factory=api
