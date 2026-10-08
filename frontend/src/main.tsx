@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Building2, Activity, ArrowDownLeft, ArrowUpRight, ArrowRight, Check, CheckCircle2, ChevronDown, ChevronRight, Circle, Clock3, Code2, Copy, Download, FileCode2, FileClock, Globe2, KeyRound, LayoutDashboard, Loader2, LockKeyhole, LogOut, Menu, MoreHorizontal, Network, Plus, RefreshCw, Search, Server, Settings2, ShieldCheck, ShieldX, SlidersHorizontal, Square, Terminal, Trash2, Users, X, XCircle, Zap } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip } from 'recharts';
 import './styles.css';
+import { apiError } from './apiError';
 import { ClassificationFields, ClassificationBadges, ServerDirectory } from './ServerDirectory';
 import { InfrastructureManager, TargetNotice, type Infrastructure } from './Infrastructures';
 import { AgentSetupWizard } from './AgentSetupWizard';
@@ -26,7 +27,7 @@ let csrf = '';
 async function api<T=any>(path:string, method='GET', body?:unknown):Promise<T> {
   const res = await fetch('/api'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},...(method==='GET'?{}:{body:JSON.stringify(body??{})})});
   let data:any;try{data=await res.json();}catch{throw new Error('Der Server antwortet nicht korrekt. Bitte später erneut versuchen.');}
-  if(!res.ok){if(res.status===401&&path!=='/auth/login'){window.dispatchEvent(new Event('session-expired'));}throw Object.assign(new Error(Array.isArray(data.detail)?data.detail.map((d:any)=>`${d.loc.slice(1).join('.')}: ${d.msg}`).join('\n'):typeof data.detail==='object'&&data.detail?data.detail.message||'Anfrage fehlgeschlagen.':data.detail||'Anfrage fehlgeschlagen.'),{code:data.detail?.code});}
+  if(!res.ok){if(res.status===401&&path!=='/auth/login'){window.dispatchEvent(new Event('session-expired'));}throw apiError(data);}
   return data;
 }
 const fmt=(v?:number|null)=>v==null?'—':new Intl.NumberFormat('de-DE').format(v);

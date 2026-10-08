@@ -31,6 +31,8 @@ Nach Änderungen am Profil `sudo systemctl restart haproxy-control-agent` ausfü
 
 ## Importfehler beheben
 
+Wird im Dialog nur `[object Object]` angezeigt, die Management-WebUI auf das aktuelle Image aktualisieren und die Seite neu laden (bei Bedarf mit `Strg+F5`). Die Fehlerantwort enthält wieder Klartext auch für ältere, bereits geladene Oberflächen. Die aktuelle Oberfläche zeigt zusätzlich den Update-Befehl bei fehlender Agent-Funktion. HTML wird beim erneuten Laden auf Änderungen geprüft. Danach die tatsächliche Fehlermeldung anhand der folgenden Hinweise beheben.
+
 Dass **Aktive Konfiguration** angezeigt wird, bestätigt nur den Zugriff auf die Hauptdatei (`/config`). Für den Import aller geladenen Dateien und Maps wird zusätzlich `/config-bundle` benötigt. Fehlt dieser Endpunkt beim Agenten, bietet der Importdialog **Update-Befehl anzeigen** an (Administrator erforderlich). Den Befehl auf dem dort genannten HAProxy-Host ausführen und anschließend **Nach Update erneut einlesen** wählen. Die Aktualisierung der Management-WebUI allein aktualisiert keinen entfernten Agenten.
 
 Bei anderen Fehlern zeigt der Dialog die Ursache des Agenten an:

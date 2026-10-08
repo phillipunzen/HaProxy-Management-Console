@@ -85,7 +85,9 @@ def api(monkeypatch):
 def test_missing_bundle_endpoint_offers_update_without_changing_draft(api,status):
     c,factory,state=api;state.update(status=status,detail='Not Found')
     result=c.post('/api/instances/1/import-preview',json={})
-    assert result.status_code==422 and result.json()['detail']['code']=='agent_update_required'
+    assert result.status_code==422 and result.json()['code']=='agent_update_required'
+    assert isinstance(result.json()['detail'],str) and '/config-bundle fehlt' in result.json()['detail']
+    assert result.headers['Cache-Control']=='no-store'
     assert len(state['calls'])==1
     update=c.post('/api/instances/1/agent-update',json={})
     assert update.status_code==200 and 'HAPROXY_AGENT_UPDATE_ONLY=1' in update.json()['command']
@@ -124,7 +126,7 @@ def test_legacy_upload_allows_preview_but_never_untracked_commit(api):
     preview=result.json();assert preview['agent_update_required'] and not preview['can_import']
     assert preview['source_files']==[] and len(preview['document']['imported_routes'])==1
     commit=c.post('/api/instances/1/import',json={**payload,**{key:preview[key] for key in ('active_hash','preview_hash','document_version')}})
-    assert commit.status_code==422 and commit.json()['detail']['code']=='agent_update_required'
+    assert commit.status_code==422 and commit.json()['code']=='agent_update_required'
     with factory() as db:assert db.get(Instance,1).document_version==0
     state.update(status=200);retry=c.post('/api/instances/1/import-preview',json=payload)
     assert retry.status_code==200 and retry.json()['can_import'] and not retry.json()['agent_update_required']
@@ -189,3 +191,22 @@ def test_agent_reports_unreadable_bundle_as_file_error(monkeypatch,tmp_path,erro
     profile={'config_path':str(tmp_path/'haproxy.cfg')}
     with pytest.raises(HTTPException) as raised:agent.config_bundle('edge',profile)
     assert raised.value.status_code==422 and expected in raised.value.detail
+
+
+def test_html_revalidates_while_api_and_assets_keep_their_cache_policy():
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse,JSONResponse,Response
+    app=FastAPI()
+    app.middleware('http')(main.security_headers)
+    @app.get('/{path:path}')
+    def response(path):
+        if path.startswith('api/'):
+            return JSONResponse({'detail':'Denied'},status_code=401)
+        if path.startswith('assets/'):
+            return Response('export {}',media_type='text/javascript',headers={'Cache-Control':'public, max-age=31536000, immutable'})
+        return HTMLResponse('<html>New frontend</html>')
+    with TestClient(app) as client:
+        for path in ('/','/index.html','/config'):
+            result=client.get(path);assert result.status_code==200 and result.headers['Cache-Control']=='no-cache'
+        assert client.get('/api/auth/me').headers['Cache-Control']=='no-store'
+        assert client.get('/assets/versioned.js').headers['Cache-Control']=='public, max-age=31536000, immutable'

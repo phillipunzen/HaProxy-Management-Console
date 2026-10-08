@@ -3,7 +3,7 @@ WORKDIR /build/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+RUN npm test && npm run build
 
 FROM python:3.13-slim-bookworm AS app
 ARG VCS_REF=unknown

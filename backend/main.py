@@ -177,6 +177,14 @@ app=FastAPI(title='HAProxy Control',version='0.1.0',lifespan=lifespan,docs_url=N
 app.include_router(basic_auth_api.router(admin,operator,audit))
 app.include_router(infrastructures.router(current_user,admin,audit))
 
+class AgentUpdateRequired(HTTPException):
+    def __init__(self,message):super().__init__(422,message)
+
+@app.exception_handler(AgentUpdateRequired)
+async def agent_update_error(request,error):
+    # Keep detail textual for browsers that still run a previously loaded UI.
+    return JSONResponse({'detail':error.detail,'code':'agent_update_required'},status_code=error.status_code)
+
 SETUP_ROOT = Path(__file__).resolve().parent.parent
 
 @app.post('/api/agent-setup')
@@ -215,7 +223,7 @@ def import_preview_for(i,body):
         if error.status_code not in (404,405):
             raise HTTPException(error.status_code,'Datei-Import fehlgeschlagen: '+str(error.detail)) from error
         if body.config is None:
-            raise HTTPException(422,{'code':'agent_update_required','message':'Der Agent stellt den Datei-Import nicht bereit (/config-bundle fehlt). Den Agenten auf diesem HAProxy-Host aktualisieren und anschließend erneut einlesen.'}) from error
+            raise AgentUpdateRequired('Der Agent stellt den Datei-Import nicht bereit (/config-bundle fehlt). Den Agenten auf diesem HAProxy-Host aktualisieren und anschließend erneut einlesen.') from error
         active=agent(i,'/config')
         bundle={'config':active['config'],'hash':active['hash'],'sources':[],'maps':[],
                 'agent_update_required':True,
@@ -244,7 +252,7 @@ def preview_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(g
 @app.post('/api/instances/{id}/import')
 def commit_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);preview=import_preview_for(i,body)
-    if not preview['can_import']:raise HTTPException(422,{'code':'agent_update_required','message':'Vor der Übernahme den Agenten aktualisieren und die Vorschau erneut laden. Die vollständige Liste geladener Dateien ist mit diesem Agenten nicht verfügbar.'})
+    if not preview['can_import']:raise AgentUpdateRequired('Vor der Übernahme den Agenten aktualisieren und die Vorschau erneut laden. Die vollständige Liste geladener Dateien ist mit diesem Agenten nicht verfügbar.')
     if body.active_hash!=preview['active_hash']:raise HTTPException(409,'Aktive Hauptdatei wurde geändert; Vorschau erneut laden.')
     if body.preview_hash!=preview['preview_hash']:raise HTTPException(409,'Dateien, Maps oder Import-Inhalt wurden geändert; Vorschau erneut laden.')
     basic_auth.lock_directory(db)
@@ -276,6 +284,7 @@ async def security_headers(request,call_next):
     response.headers['Referrer-Policy']='same-origin'
     response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     if request.url.path.startswith('/api'): response.headers['Cache-Control']='no-store'
+    elif response.headers.get('content-type','').startswith('text/html'):response.headers['Cache-Control']='no-cache'
     return response
 
 @app.get('/api/health')
