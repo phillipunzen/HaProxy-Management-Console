@@ -58,7 +58,10 @@ Die Oberfläche unter `APP_ORIGIN` öffnen und mit `ADMIN_USERNAME` / `ADMIN_PAS
 | `ADMIN_USERNAME` | Name des ersten Administrators, standardmäßig `admin`. |
 | `ADMIN_PASSWORD` | Zufälliges Startpasswort mit mindestens 10 Zeichen. |
 | `COOKIE_SECURE` | `false` für HTTP im privaten LAN; `true` beim Zugriff über HTTPS. |
-| `METRICS_INTERVAL` | Statistik-Abfrageintervall in Sekunden, standardmäßig `30`; mindestens `10` wird verwendet. |
+| `METRICS_INTERVAL` | Collector-Intervall in Sekunden, standardmäßig `30`; erlaubt sind `10`–`3600`. Browser-Aufrufe speichern keine weiteren Messpunkte. |
+| `METRICS_RAW_HOURS` | Aufbewahrung der 30-Sekunden-Intervalle in Stunden; Standard `2`, erlaubt `1`–`24`. |
+| `METRICS_FINE_DAYS` | Aufbewahrung der 5-Minuten-Intervalle in Tagen; Standard `1`, erlaubt `1`–`30`. |
+| `METRICS_RETENTION_DAYS` | Aufbewahrung der Stundenwerte in Tagen; Standard `7`, erlaubt `1`–`365`, mindestens `METRICS_FINE_DAYS`. |
 | `AGENT_CA_FILE` | Optionaler Pfad zu einem CA-Bundle **im Container** für Agenten mit interner CA; sonst leer lassen. |
 
 Für eine interne CA `agent-ca-bundle.pem` mit System-CAs und der internen CA neben die Compose-Datei legen, den kommentierten `volumes`-Abschnitt aktivieren und `AGENT_CA_FILE=/certs/agent-ca-bundle.pem` setzen.
@@ -104,3 +107,7 @@ Der Container läuft ohne Root-Rechte, mit schreibgeschütztem Dateisystem und o
 ## Vorhandene HAProxy-Konfiguration importieren
 
 Nach dem Verbinden des Hosts unter **Proxy Hosts → Vorhandene Config einlesen** den Agenten als Quelle wählen oder Konfigurationsdateien und Maps hochladen. Der Import erstellt einen Entwurf; erst Prüfen und Anwenden aktiviert ihn. Bei bestehenden Agenten zuvor unter **Server → Agent aktualisieren** den Befehl erstellen und auf dem HAProxy-Host ausführen. Die beiliegende [Import-Anleitung](IMPORT.md) beschreibt mehrere Dateien, Domain-Maps, TCP-Pools und Sicherungen.
+
+## Metrikspeicher bei Updates
+
+Neue Messungen speichern nur kompakte globale Werte. Die alte Tabelle `metrics` wird automatisch in Zeitintervalle übernommen; unter **Einstellungen → Metrikspeicher** lässt sich der Fortschritt prüfen und danach freier Platz zurückgeben. Die [Metrik-Anleitung](METRICS.md) beschreibt die Aufbewahrung, Durchschnitt/Spitzenwerte, Ausfälle und MariaDB-Optimierung.

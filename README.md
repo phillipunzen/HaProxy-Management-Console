@@ -63,9 +63,13 @@ Für Updates `docker compose -f compose.registry.yaml pull` und danach `docker c
 - Vollständiger Konfigurationseditor mit Vergleich zur aktiven Datei, Export, Validierung, Entwürfen, Versionshistorie und Wiederherstellung als neuer Entwurf.
 - Geprüftes Anwenden: `haproxy -c`, externe Änderungen per Hash erkennen, alte Version sichern, Datei atomar wechseln, Reload und neuen Worker bestätigen. Fehler lösen eine Wiederherstellung aus; Netzwerkfehler werden als unklarer Status dokumentiert.
 - Let's Encrypt über Certbot: HTTP-01, Cloudflare DNS-01, mehrere Domains und Wildcards; getrennte Staging-Zertifikate; PEM-Import mit Schlüsselvergleich; Erneuerungsprüfung alle 12 Stunden auf dem Agenten.
-- Runtime-Statistiken mit getrennten Frontends, Backend-Pools und Zielservern; HTTP/HTTPS, TCP/TLS-Passthrough, Prometheus und Statistikdienst, Protokollfilter und Suche. Sessions, HTTP-Raten/Fehler, Traffic und Verlauf mit 7 Tagen Aufbewahrung; Sammlung alle 30 Sekunden.
+- Runtime-Statistiken mit getrennten Frontends, Backend-Pools und Zielservern; HTTP/HTTPS, TCP/TLS-Passthrough, Prometheus und Statistikdienst, Protokollfilter und Suche. Sessions, HTTP-Raten/Fehler und Traffic live. Kompakter Verlauf mit Durchschnitt, Spitzenwert und Erreichbarkeit: 30-Sekunden-Intervalle für 2 Stunden, 5-Minuten-Intervalle für 1 Tag und Stundenwerte für 7 Tage. Ausschließlich der Collector schreibt Messpunkte; Statistikaufrufe erzeugen keine zusätzlichen Datenbankeinträge.
 - Import vorhandener Konfigurationen einschließlich mehrerer geladener Dateien und Host-Maps: Vorschau, grafisch bearbeitbare Domain-Zuordnungen und HTTP-/TCP-Backend-Ziele; unbekannte Direktiven bleiben im Text erhalten. Gemeinsame Dateisicherung und Wiederherstellung bei Fehlern.
 - Aktivitätsprotokoll für Anmeldung und Änderungen.
+
+## Metriken ohne große Datenbank
+
+Der Hintergrund-Collector speichert nur globale Messwerte. Vollständige Frontend-/Backend-Zeilen werden live geladen und nicht mehr in jeder historischen Zeile abgelegt. Die Standardaufbewahrung begrenzt den Verlauf auf höchstens ungefähr 700 kompakte Intervalle pro Instanz plus eine aktuelle Zusammenfassung. Alte `metrics`-Datensätze werden beim Update automatisch und schrittweise übernommen. Unter **Einstellungen → Metrikspeicher** stehen Fortschritt und Tabellenbelegung; danach lässt sich der Platz der alten Tabelle über **Speicher freigeben** zurückgeben. Details, ENV-Variablen und Grenzen stehen in [METRICS.md](docs/METRICS.md).
 
 ## Neues Deployment
 
@@ -138,7 +142,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 npm ci --prefix frontend
 npm run build --prefix frontend
-.venv/bin/python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py tests/test_agent_setup.py tests/test_agent_installer.py tests/test_config_import.py -q
+.venv/bin/python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py tests/test_agent_setup.py tests/test_agent_installer.py tests/test_config_import.py tests/test_metrics.py -q
 .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8100
 ```
 

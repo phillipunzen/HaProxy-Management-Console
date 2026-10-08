@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, String, Text, Integer, DateTime, Boolean, JSON, ForeignKey, Index
+from sqlalchemy import create_engine, String, Text, Integer, SmallInteger, Double, DateTime, Boolean, JSON, ForeignKey, Index
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from backend.settings import settings
@@ -55,12 +55,36 @@ class Revision(Base):
     applied_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 class Metric(Base):
+    # Legacy snapshots are migrated in bounded transactions by backend.metrics.
     __tablename__ = 'metrics'
     id: Mapped[int] = mapped_column(primary_key=True)
     instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id', ondelete='CASCADE'))
     collected_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     data: Mapped[dict] = mapped_column(JSON)
     __table_args__ = (Index('ix_metrics_instance_time', 'instance_id', 'collected_at'), Index('ix_metrics_time', 'collected_at'))
+
+class MetricLatest(Base):
+    __tablename__ = 'metric_latest'
+    instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id',ondelete='CASCADE'),primary_key=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime)
+    data: Mapped[dict] = mapped_column(JSON)
+
+class MetricBucket(Base):
+    __tablename__ = 'metric_buckets'
+    instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id',ondelete='CASCADE'),primary_key=True)
+    resolution: Mapped[int] = mapped_column(SmallInteger,primary_key=True)
+    bucket_start: Mapped[datetime] = mapped_column(DateTime,primary_key=True)
+    samples: Mapped[int] = mapped_column(Integer,default=0)
+    online_samples: Mapped[int] = mapped_column(Integer,default=0)
+    rate_sum: Mapped[float] = mapped_column(Double,default=0)
+    rate_count: Mapped[int] = mapped_column(Integer,default=0)
+    rate_peak: Mapped[float | None] = mapped_column(Double)
+    sessions_sum: Mapped[float] = mapped_column(Double,default=0)
+    sessions_count: Mapped[int] = mapped_column(Integer,default=0)
+    sessions_peak: Mapped[float | None] = mapped_column(Double)
+    last_at: Mapped[datetime] = mapped_column(DateTime)
+    last_data: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = (Index('ix_metric_bucket_expiry','resolution','bucket_start'),)
 
 class Audit(Base):
     __tablename__ = 'audit'

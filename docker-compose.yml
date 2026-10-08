@@ -19,6 +19,9 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the browser URL in .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       METRICS_INTERVAL: ${METRICS_INTERVAL:-30}
+      METRICS_RAW_HOURS: ${METRICS_RAW_HOURS:-2}
+      METRICS_FINE_DAYS: ${METRICS_FINE_DAYS:-1}
+      METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
       AGENT_CA_FILE: ${AGENT_CA_FILE:-}
     # Optional internal CA: enable this mount and set AGENT_CA_FILE in .env.
     # volumes:

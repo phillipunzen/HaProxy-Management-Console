@@ -19,10 +19,11 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete, func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError,SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,Metric,Audit
+from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,MetricLatest,Audit
+from backend import metrics as metric_store
 from backend.settings import settings
 from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn,ImportedMap
 from backend.generator import generate
@@ -117,13 +118,8 @@ def collect_metrics():
             try: data=agent(i,'/stats',timeout=8)
             except HTTPException as e: data={'online':False,'error':str(e.detail)}
             with SessionLocal() as db:
-                exists=db.scalar(select(Instance.id).where(Instance.id==id).with_for_update())
-                if exists is None: continue
-                db.add(Metric(instance_id=id,data=data));db.commit()
-        with SessionLocal() as db:
-            db.execute(delete(Metric).where(Metric.collected_at<now()-timedelta(days=7)))
-            db.execute(delete(LoginSession).where(LoginSession.expires_at<now()))
-            db.commit()
+                metric_store.record(db,id,data,now(),settings);db.commit()
+        metric_store.maintain(SessionLocal,settings)
     finally:
         collection_lock.release()
 
@@ -298,9 +294,8 @@ def password(body:PasswordIn,request:Request,response:Response,user=Depends(curr
 @app.get('/api/instances')
 def list_instances(user=Depends(current_user),db=Depends(get_db)):
     out=[]
-    for i in db.scalars(select(Instance).order_by(Instance.id)):
-        metric=db.scalar(select(Metric).where(Metric.instance_id==i.id).order_by(Metric.id.desc()).limit(1))
-        out.append(public_instance(i)|{'stats':metric.data if metric else None,'collected_at':metric.collected_at.isoformat()+'Z' if metric else None})
+    for i,metric in db.execute(select(Instance,MetricLatest).outerjoin(MetricLatest).order_by(Instance.id)):
+        out.append(public_instance(i)|{'stats':metric.data if metric else None,'collected_at':metric.collected_at.isoformat()+'Z' if metric else None,'fresh_for_seconds':max(90,settings.metrics_interval*3)})
     return out
 
 @app.post('/api/instances')
@@ -439,17 +434,31 @@ def stats(id:int,user=Depends(current_user),db=Depends(get_db)):
     except HTTPException:
         try:data=enrich_stats(data,agent(i,'/config')['config'])
         except HTTPException:data=enrich_stats(data)
-    db.rollback()
-    if db.scalar(select(Instance.id).where(Instance.id==id).with_for_update()) is None: raise HTTPException(404,'Instanz wurde entfernt.')
-    db.add(Metric(instance_id=id,data=data));db.commit();return data
+    # Live detail responses never create history rows; only the collector writes.
+    return data|{'history_policy':{'raw_hours':settings.metrics_raw_hours,'fine_days':settings.metrics_fine_days,'total_days':settings.metrics_retention_days}}
 
 @app.get('/api/instances/{id}/metrics')
 def metrics(id:int,hours:int=1,user=Depends(current_user),db=Depends(get_db)):
     instance(db,id)
     if hours not in (1,6,24,168): raise HTTPException(422,'Zeitraum: 1, 6, 24 oder 168 Stunden.')
-    values=list(db.scalars(select(Metric).where(Metric.instance_id==id,Metric.collected_at>now()-timedelta(hours=hours)).order_by(Metric.id)))
-    step=max(1,len(values)//500)
-    return [{'time':m.collected_at.isoformat()+'Z',**{k:m.data.get(k) for k in ('online','request_rate','sessions','bytes_in','bytes_out','requests','errors_5xx')}} for m in values[::step]]
+    return metric_store.history(db,id,hours,settings)
+
+@app.get('/api/metrics/storage')
+def metric_storage(user=Depends(admin),db=Depends(get_db)):
+    return metric_store.storage(db,settings)
+
+@app.post('/api/metrics/storage/compact')
+def compact_metric_storage(user=Depends(admin),db=Depends(get_db)):
+    if not collection_lock.acquire(blocking=False):raise HTTPException(409,'Metriksammlung läuft gerade. Erneut versuchen.')
+    try:
+        try:metric_store.optimize_legacy(db)
+        except ValueError as error:raise HTTPException(409,str(error))
+        except (SQLAlchemyError,RuntimeError) as error:
+            db.rollback();logger.exception('Legacy metric table optimization failed')
+            raise HTTPException(422,'MariaDB konnte die alte Metriktabelle nicht optimieren. Datenbankrechte und Serverlog prüfen.') from error
+        audit(db,user.username,'metrics.storage.compacted');db.commit()
+        return metric_store.storage(db,settings)
+    finally:collection_lock.release()
 
 @app.get('/api/instances/{id}/certificates')
 def certificates(id:int,user=Depends(current_user),db=Depends(get_db)): return agent(instance(db,id),'/certificates')

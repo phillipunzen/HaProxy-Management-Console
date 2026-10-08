@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Run unit tests
-        run: python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py tests/test_agent_setup.py tests/test_agent_installer.py tests/test_config_import.py -q
+        run: python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py tests/test_agent_setup.py tests/test_agent_installer.py tests/test_config_import.py tests/test_metrics.py -q
 
   image:
     name: Build and publish image
