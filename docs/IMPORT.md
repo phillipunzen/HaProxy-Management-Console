@@ -29,6 +29,20 @@ Diese optionalen Profilwerte sind **Host-Pfade**, auch für Docker. `config_path
 
 Nach Änderungen am Profil `sudo systemctl restart haproxy-control-agent` ausführen. Ein Import wird abgelehnt, wenn die geladene Dateiliste nicht vollständig ermittelt werden kann. Der Start eines gestoppten HAProxy-Dienstes ist weiterhin mit der Hauptdatei möglich; bei mehreren Dateien `config_sources` konfigurieren.
 
+## Importfehler beheben
+
+Dass **Aktive Konfiguration** angezeigt wird, bestätigt nur den Zugriff auf die Hauptdatei (`/config`). Für den Import aller geladenen Dateien und Maps wird zusätzlich `/config-bundle` benötigt. Fehlt dieser Endpunkt beim Agenten, bietet der Importdialog **Update-Befehl anzeigen** an (Administrator erforderlich). Den Befehl auf dem dort genannten HAProxy-Host ausführen und anschließend **Nach Update erneut einlesen** wählen. Die Aktualisierung der Management-WebUI allein aktualisiert keinen entfernten Agenten.
+
+Bei anderen Fehlern zeigt der Dialog die Ursache des Agenten an:
+
+- `config_path gehört nicht zu den geladenen Dateien` oder unvollständige Dateiliste: `config_path` und sämtliche `config_sources` im passenden Agent-Profil prüfen; bei Docker Host-Pfade verwenden.
+- Datei außerhalb der Docker-Mounts: Konfiguration und Maps auf dem HAProxy-Host mounten und die Container-/Host-Pfade im Profil abgleichen.
+- Datei nicht vorhanden, fehlende Leserechte oder ungültige Kodierung: genannte Datei auf dem HAProxy-Host prüfen. Konfigurationen und Maps müssen für den Agent-Dienst als UTF-8 lesbar sein.
+- Agent nicht erreichbar oder Zugriff verweigert: Agent-Adresse, TLS, Firewall, Profilname und Agent-Token der Serververbindung prüfen.
+- Bereits laufende Änderung oder Zeitüberschreitung: laufende Dienstaktion abwarten und erneut einlesen; bei wiederholten Fehlern `sudo journalctl -u haproxy-control-agent -n 100 --no-pager` auf dem HAProxy-Host prüfen.
+
+Bei einem alten Agenten lässt sich hochgeladener Text weiterhin in der Vorschau ansehen. Die Übernahme bleibt bis zur Agent-Aktualisierung gesperrt, damit keine unbekannten zusätzlichen Dateien beim späteren Anwenden übergangen werden. Dateifehler lassen sich durch manuelles Hochladen nicht umgehen.
+
 ## 2. Einlesen und prüfen
 
 1. Gewünschte Instanz auswählen und **Proxy Hosts** oder **Konfiguration** öffnen.

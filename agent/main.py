@@ -335,7 +335,12 @@ def capabilities(profile: str,p=Depends(auth)):
 
 @app.get('/profiles/{profile}/config-bundle')
 def config_bundle(profile: str,p=Depends(auth)):
-    with lock(p):return read_bundle(p,run,sha)
+    with lock(p):
+        try:return read_bundle(p,run,sha)
+        except OSError as error:
+            raise HTTPException(422,f'Konfigurationsdateien oder Maps können nicht gelesen werden: {error.strerror or type(error).__name__} ({error.filename or "Dateipfad unbekannt"}). Dateipfade, Leserechte und Docker-Mounts auf dem HAProxy-Host prüfen.') from error
+        except UnicodeDecodeError as error:
+            raise HTTPException(422,'Konfigurationsdateien und Maps müssen als UTF-8 lesbar sein. Dateikodierung auf dem HAProxy-Host prüfen.') from error
 
 @app.get('/profiles/{profile}/config')
 def read_config(profile: str,p=Depends(auth)):

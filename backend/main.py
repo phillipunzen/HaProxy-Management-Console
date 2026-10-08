@@ -116,7 +116,10 @@ def agent(i,path='',method='GET',body=None,timeout=10):
         if result.status_code>=400:
             try: detail=result.json().get('detail','Agent-Fehler')
             except ValueError: detail='Agent antwortet mit einem Fehler.'
-            raise HTTPException(result.status_code if result.status_code in (401,403,409,422,502,504) else 502,detail)
+            # A missing endpoint is distinct from a failed file read. Agent authentication
+            # also must not expire the user's management session in the browser.
+            if result.status_code==401:raise HTTPException(502,'Agent hat den Zugriff verweigert. Profilname und Agent-Token dieser Serververbindung prüfen.')
+            raise HTTPException(result.status_code if result.status_code in (403,404,405,409,422,502,504) else 502,detail)
         if result.status_code>=300: raise HTTPException(502,'Agent-Weiterleitungen sind nicht erlaubt.')
         return result.json()
     except (httpx.RequestError,ValueError):
@@ -209,11 +212,14 @@ class ImportRequest(BaseModel):
 def import_preview_for(i,body):
     try:bundle=agent(i,'/config-bundle')
     except HTTPException as error:
+        if error.status_code not in (404,405):
+            raise HTTPException(error.status_code,'Datei-Import fehlgeschlagen: '+str(error.detail)) from error
         if body.config is None:
-            raise HTTPException(422,'Datei-Import benötigt einen aktuellen Agenten. Unter Server den Agenten aktualisieren oder Konfiguration manuell laden.') from error
+            raise HTTPException(422,{'code':'agent_update_required','message':'Der Agent stellt den Datei-Import nicht bereit (/config-bundle fehlt). Den Agenten auf diesem HAProxy-Host aktualisieren und anschließend erneut einlesen.'}) from error
         active=agent(i,'/config')
         bundle={'config':active['config'],'hash':active['hash'],'sources':[],'maps':[],
-                'warnings':['Agent ohne Datei-Bündel: weitere geladene Dateien können nicht erkannt werden. Vor einer Migration Agent aktualisieren.']}
+                'agent_update_required':True,
+                'warnings':['Nur eine Vorschau des hochgeladenen Texts: Der Agent stellt den Datei-Import nicht bereit. Vor der Übernahme den Agenten aktualisieren, damit alle geladenen Dateien geprüft werden.']}
     source=body.config if body.config is not None else bundle['config']
     if bundle.get('complete') is False:
         raise HTTPException(422,'Geladene Dateien konnten nicht vollständig ermittelt werden. config_sources im Agent-Profil mit allen -f-Dateien bzw. Verzeichnissen setzen, dann erneut einlesen.')
@@ -223,6 +229,8 @@ def import_preview_for(i,body):
         [{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']])
     except ValueError as error:raise HTTPException(422,str(error))
     preview['warnings']+=bundle['warnings'];preview['active_hash']=bundle['hash']
+    preview['agent_update_required']=bundle.get('agent_update_required',False)
+    preview['can_import']=not preview['agent_update_required']
     preview['source_files']=[s['path'] for s in bundle['sources']]
     preview['preview_hash']=hashlib.sha256(json.dumps(preview['document'],sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return preview
@@ -236,6 +244,7 @@ def preview_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(g
 @app.post('/api/instances/{id}/import')
 def commit_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);preview=import_preview_for(i,body)
+    if not preview['can_import']:raise HTTPException(422,{'code':'agent_update_required','message':'Vor der Übernahme den Agenten aktualisieren und die Vorschau erneut laden. Die vollständige Liste geladener Dateien ist mit diesem Agenten nicht verfügbar.'})
     if body.active_hash!=preview['active_hash']:raise HTTPException(409,'Aktive Hauptdatei wurde geändert; Vorschau erneut laden.')
     if body.preview_hash!=preview['preview_hash']:raise HTTPException(409,'Dateien, Maps oder Import-Inhalt wurden geändert; Vorschau erneut laden.')
     basic_auth.lock_directory(db)

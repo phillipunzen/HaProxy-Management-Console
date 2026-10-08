@@ -121,7 +121,7 @@ Bei bestehenden HAProxy-Servern **Proxy Hosts → Vorhandene Config einlesen** w
 
 Domain-Zuordnungen aus einfachen Host-Maps und Host-ACLs sowie statische Backend-Ziele werden grafisch bearbeitbar. Globale Einstellungen, Header, Redirects, Authentifizierung und Sonderregeln bleiben erhalten. **Konfiguration erzeugen** setzt die Änderungen in den eingelesenen Text ein. Im Editor vergleichen, prüfen und anwenden. Bei mehreren geladenen Dateien werden die Abschnitte beim Anwenden in der Hauptdatei zusammengeführt; alle Originaldateien werden gesichert. Die [Import-Anleitung](docs/IMPORT.md) beschreibt Voraussetzungen, Grenzen und Wiederherstellung.
 
-Einen bestehenden Agenten unter **Server → Agent aktualisieren** aktualisieren und den erzeugten Befehl auf dem HAProxy-Host ausführen. Bei eigener Dateistruktur gegebenenfalls `config_sources` und `map_dirs` im Agent-Profil setzen.
+Fehlt die Datei-Import-Funktion, bietet der Importdialog direkt einen **Update-Befehl** und das erneute Einlesen an. Andere Fehler zeigen die konkrete Ursache statt eines pauschalen Update-Hinweises. Einen bestehenden Agenten alternativ unter **Server → Agent aktualisieren** aktualisieren und den erzeugten Befehl auf dem HAProxy-Host ausführen. Bei eigener Dateistruktur gegebenenfalls `config_sources` und `map_dirs` im Agent-Profil setzen.
 
 Für eine neue Konfiguration ohne Import erzeugt der grafische Editor die vollständige Datei aus Hosts, Regeln und Listenern. Manuelle Einstellungen werden in diesem Modus nicht übernommen; ein Dialog weist darauf hin. HTTPS erst einschalten, wenn im Zertifikatsverzeichnis ein gültiges Produktionszertifikat liegt. Der HAProxy-Check blockiert fehlerhafte Konfigurationen.
 

@@ -1,18 +1,21 @@
 import { useState } from 'react';
 import { BasicAuthSelector, type BasicGroup } from './BasicAuth';
-import { FileCode2, Loader2, Upload, Check, Settings2, Plus, Trash2 } from 'lucide-react';
+import { FileCode2, Loader2, Upload, Check, Settings2, Plus, Trash2, Terminal, Copy, RefreshCw } from 'lucide-react';
 
 export type ImportedBackend={name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean}[]};
 export type ImportedRoute={id:string;frontend:string;domain:string;backend:string;basic_auth_group?:number|null;basic_auth_forward?:boolean};
 export type ImportedFields={imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[]};
 type Request=(path:string,method?:string,body?:unknown)=>Promise<any>;
 
-export function ConfigImport({id,request,onDone,onBusy}:{onBusy?:(value:boolean)=>void;id:number;request:Request;onDone:(doc:any)=>void}){
+export function ConfigImport({id,request,onDone,onBusy,canUpdateAgent=false}:{canUpdateAgent?:boolean;onBusy?:(value:boolean)=>void;id:number;request:Request;onDone:(doc:any)=>void}){
   const [source,setSource]=useState('agent'),[config,setConfig]=useState(''),[extra,setExtra]=useState<{name:string;content:string}[]>([]),[maps,setMaps]=useState<{path:string;content:string}[]>([]);
-  const [preview,setPreview]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [preview,setPreview]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[needsUpdate,setNeedsUpdate]=useState(false),[updateCommand,setUpdateCommand]=useState(''),[updateError,setUpdateError]=useState('');
   const payload=source==='agent'?{}:{config:config+'\n'+extra.map(f=>f.content).join('\n\n'),maps};
-  async function load(){onBusy?.(true);setBusy(true);setError('');try{setPreview(await request(`/instances/${id}/import-preview`,'POST',payload));}catch(e){setError((e as Error).message);}finally{setBusy(false);onBusy?.(false);}}
-  async function commit(){onBusy?.(true);setBusy(true);setError('');try{onDone(await request(`/instances/${id}/import`,'POST',{...payload,active_hash:preview.active_hash,document_version:preview.document_version,preview_hash:preview.preview_hash}));}catch(e){setError((e as Error).message);}finally{setBusy(false);onBusy?.(false);}}
+  function report(error:unknown){setError((error as Error).message);setNeedsUpdate((error as Error&{code?:string}).code==='agent_update_required');}
+  async function load(){onBusy?.(true);setBusy(true);setError('');setNeedsUpdate(false);try{const value=await request(`/instances/${id}/import-preview`,'POST',payload);setPreview(value);setNeedsUpdate(!!value.agent_update_required);}catch(e){report(e);}finally{setBusy(false);onBusy?.(false);}}
+  async function commit(){onBusy?.(true);setBusy(true);setError('');try{onDone(await request(`/instances/${id}/import`,'POST',{...payload,active_hash:preview.active_hash,document_version:preview.document_version,preview_hash:preview.preview_hash}));}catch(e){report(e);}finally{setBusy(false);onBusy?.(false);}}
+  async function prepareUpdate(){onBusy?.(true);setBusy(true);setUpdateError('');try{setUpdateCommand((await request(`/instances/${id}/agent-update`,'POST')).command);}catch(e){setUpdateError((e as Error).message);}finally{setBusy(false);onBusy?.(false);}}
+  async function copyCommand(){setUpdateError('');try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(updateCommand);else{const field=document.getElementById('import-update-command') as HTMLTextAreaElement;field.focus();field.select();if(!document.execCommand('copy'))throw new Error('Bitte den markierten Befehl manuell kopieren.');}}catch(e){setUpdateError((e as Error).message);}}
   async function readFiles(files:FileList|null,kind:'config'|'extra'|'maps'){
     if(!files)return;setError('');setPreview(null);
     try{
@@ -26,8 +29,9 @@ export function ConfigImport({id,request,onDone,onBusy}:{onBusy?:(value:boolean)
   return <div className="form-body">
     <div className="notice"><FileCode2 size={18}/><span>Importiert in einen grafischen Entwurf. HAProxy bleibt unverändert, bis du eine erzeugte Konfiguration prüfst und anwendest. Vorhandene Einstellungen werden erhalten. <a href="/api/import-guide">Import-Anleitung herunterladen</a></span></div>
     {error&&<div role="alert" className="notice error">{error}</div>}
+    {needsUpdate&&<section className="import-agent-update"><h3><Terminal size={18}/>Agent für Datei-Import aktualisieren</h3><p>Den Befehl per SSH auf dem oben angezeigten HAProxy-Zielserver ausführen. Er aktualisiert den Agenten und startet dessen Dienst neu; vorhandene Profile, Tokens und HAProxy-Konfigurationen bleiben erhalten.</p>{canUpdateAgent?<>{!updateCommand?<button type="button" className="button secondary" disabled={busy} onClick={()=>void prepareUpdate()}><Terminal size={16}/>Update-Befehl anzeigen</button>:<><label htmlFor="import-update-command">Befehl auf dem HAProxy-Host</label><textarea id="import-update-command" className="wizard-command" readOnly rows={5} value={updateCommand} onFocus={e=>e.currentTarget.select()}/><button type="button" className="button secondary" disabled={busy} onClick={()=>void copyCommand()}><Copy size={16}/>Befehl kopieren</button></>}</>:<p>Ein Administrator kann hier den Update-Befehl anzeigen oder unter Server den Agenten aktualisieren.</p>}{updateError&&<div role="alert" className="notice error">{updateError}</div>}<button type="button" className="button" disabled={busy} onClick={()=>void load()}><RefreshCw size={16}/>Nach Update erneut einlesen</button></section>}
     {!preview?<>
-      <div className="field"><label htmlFor="import-source">Quelle</label><select id="import-source" value={source} onChange={e=>setSource(e.target.value)}><option value="agent">Aktive Dateien vom HAProxy-Agenten einlesen</option><option value="files">Konfiguration und Maps hochladen / einfügen</option></select></div>
+      <div className="field"><label htmlFor="import-source">Quelle</label><select id="import-source" value={source} disabled={busy} onChange={e=>{setSource(e.target.value);setError('');setNeedsUpdate(false);setPreview(null);}}><option value="agent">Aktive Dateien vom HAProxy-Agenten einlesen</option><option value="files">Konfiguration und Maps hochladen / einfügen</option></select></div>
       {source==='agent'?<p className="wizard-intro">Der Agent erkennt die geladenen -f-Dateien und Verzeichnisse sowie referenzierte Host-Maps. Dafür muss der Agent diese Funktion unterstützen. Unter Server findest du den Befehl zur Aktualisierung.</p>:<>
         <div className="field"><label htmlFor="import-main-file">Hauptkonfiguration (.cfg)</label><input id="import-main-file" type="file" accept=".cfg,.conf,.txt" onChange={e=>void readFiles(e.target.files,'config')}/></div>
         <textarea className="wizard-command" aria-label="Konfiguration für Import" rows={8} placeholder="global … defaults … frontend …" value={config} onChange={e=>setConfig(e.target.value)}/>
@@ -42,7 +46,7 @@ export function ConfigImport({id,request,onDone,onBusy}:{onBusy?:(value:boolean)
       {preview.source_files?.length>1&&<div className="notice"><span>Beim späteren Anwenden werden {preview.source_files.length} geladene Dateien in der Hauptkonfiguration zusammengeführt. Die übrigen Dateien bleiben als Kommentar-Dateien vorhanden, damit dieselben Abschnitte nicht doppelt geladen werden. Alle Originaldateien werden auf dem Agenten gesichert.</span></div>}
       <div className="table-wrap"><table><thead><tr><th>ABSCHNITT</th><th>MODUS</th><th>ERKANNT ALS</th></tr></thead><tbody>{preview.proxies.map((p:any,i:number)=><tr key={i}><td><strong>{p.name}</strong><small>{p.kind}</small></td><td><span className="badge">{p.mode.toUpperCase()}</span></td><td>{p.service}</td></tr>)}</tbody></table></div>
       {preview.warnings.length>0&&<div className="notice"><div><strong>Hinweise zur Übernahme</strong><ul>{preview.warnings.map((w:string,i:number)=><li key={i}>{w}</li>)}</ul></div></div>}
-      <div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={()=>setPreview(null)}>Zurück</button><button type="button" className="button" disabled={busy} onClick={()=>void commit()}>{busy?<Loader2 size={16} className="spin"/>:<Check size={16}/>}Als grafischen Entwurf übernehmen</button></div>
+      <div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={()=>setPreview(null)}>Zurück</button><button type="button" className="button" disabled={busy||preview.can_import===false||needsUpdate} onClick={()=>void commit()}>{busy?<Loader2 size={16} className="spin"/>:<Check size={16}/>}Als grafischen Entwurf übernehmen</button></div>
     </>}
   </div>;
 }
