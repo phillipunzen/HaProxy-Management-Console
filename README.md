@@ -59,6 +59,7 @@ Für Updates `docker compose -f compose.registry.yaml pull` und danach `docker c
 - Benutzerrollen: Admin (alle Rechte), Operator (Konfiguration, Zertifikate, Reload/Start/Restart), Viewer (Statistiken und Zertifikatsmetadaten).
 - Zentrale Basic-Auth-Benutzer und Gruppen für einzelne HTTP-/HTTPS-Websites, auch bei importierten Domain-Routen und gemeinsamen Backends. Passwörter ab 10 Zeichen, gesalzene Hashes, Benutzer deaktivieren und ausstehende Änderungen pro Instanz aktivieren. [Einrichtung und Aktivierung](docs/BASIC_AUTH.md).
 - Mehrere Agent-Profile mit verschlüsselten Zugangstokens; native systemd-Dienste und Docker-Container.
+- Server mit frei wählbaren Tags (z. B. Prod, Dev, Kunde A) und Standort versehen; Serverliste nach Tags, Standort und Suchtext filtern. Zuordnungen auch bei nicht erreichbaren Hosts ohne Agent-Token oder Reload bearbeiten. [Anleitung](docs/SERVERS.md).
 - Grafischer Entwurf für Domains/Wildcards, Pfadrouting, mehrere Backends, Gewichte, Healthchecks, Round Robin/Least Connections/Source und geprüfte TLS-Verbindungen zum Backend.
 - HTTP-/HTTPS-Listener, HTTPS-Weiterleitungen, ACLs für Host, Pfad, IP-Netze und Methoden, feste URL-Redirects und Request-Header.
 - Vollständiger Konfigurationseditor mit Vergleich zur aktiven Datei, Export, Validierung, Entwürfen, Versionshistorie und Wiederherstellung als neuer Entwurf.

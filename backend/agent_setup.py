@@ -8,11 +8,12 @@ import secrets
 import shlex
 from pathlib import Path, PurePosixPath
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from typing import Literal
+from backend.schemas import InstanceMetadataIn
 
 
-class AgentSetupIn(BaseModel):
+class AgentSetupIn(InstanceMetadataIn):
     name: str = Field(min_length=1, max_length=120)
     kind: Literal['native', 'docker']
     host: str
@@ -94,4 +95,5 @@ def build_plan(body: AgentSetupIn, origin: str, root: Path):
     command=installation_command(origin,root,'HAPROXY_AGENT_SETUP_B64='+shlex.quote(encoded))
     host = f'[{body.host}]' if ':' in body.host else body.host
     return {'command': command, 'instance': {'name': body.name, 'agent_url': f'http://{host}:{body.port}',
-            'profile': body.profile, 'token': profile['token'], 'allow_http': True, 'notes': ''}}
+            'profile': body.profile, 'token': profile['token'], 'allow_http': True, 'notes': '',
+            'tags':body.tags,'location':body.location}}

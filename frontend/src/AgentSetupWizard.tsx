@@ -1,8 +1,10 @@
 import React, { useId, useRef, useState } from 'react';
 import { Check, CheckCircle2, ChevronLeft, Copy, Loader2, Server, Terminal } from 'lucide-react';
 
+import { ClassificationFields } from './ServerDirectory';
+
 type Kind = 'native' | 'docker';
-type Plan = {command:string; instance:{name:string;agent_url:string;profile:string;token:string;allow_http:boolean;notes:string}};
+type Plan = {command:string; instance:{name:string;agent_url:string;profile:string;token:string;allow_http:boolean;notes:string;tags:string[];location:string}};
 const paths = (kind:Kind) => kind === 'native'
   ? {profile:'native',config_path:'/etc/haproxy/haproxy.cfg',runtime_socket:'/run/haproxy/admin.sock',cert_dir:'/etc/haproxy/certs'}
   : {profile:'docker-edge',config_path:'/opt/haproxy/config/haproxy.cfg',runtime_socket:'/opt/haproxy/run/admin.sock',cert_dir:'/opt/haproxy/certs'};
@@ -17,7 +19,7 @@ export function AgentSetupWizard({request,onConnected,onExisting}:{
   onExisting:()=>void;
 }) {
   const [step,setStep]=useState(0), [busy,setBusy]=useState(false), [error,setError]=useState(''), [copied,setCopied]=useState(false);
-  const [value,setValue]=useState({name:'',kind:'native' as Kind,host:'',port:9101,service:'haproxy',container:'haproxy',
+  const [value,setValue]=useState({tags:[] as string[],location:'',name:'',kind:'native' as Kind,host:'',port:9101,service:'haproxy',container:'haproxy',
     container_config_dir:'/usr/local/etc/haproxy',runtime_socket_config:'/run/haproxy/admin.sock',cert_dir_config:'/etc/haproxy/certs',allow_http:false,...paths('native')});
   const [plan,setPlan]=useState<Plan|null>(null);
   const commandRef=useRef<HTMLTextAreaElement>(null);
@@ -37,6 +39,7 @@ export function AgentSetupWizard({request,onConnected,onExisting}:{
       <h3>Wie läuft HAProxy auf diesem Host?</h3><p className="wizard-intro">Der Assistent erstellt einen Installationsbefehl für einen vorhandenen HAProxy auf Debian oder Ubuntu mit systemd.</p>
       <div className="wizard-kind">{(['native','docker'] as Kind[]).map(kind=><button key={kind} type="button" className={value.kind===kind?'selected':''} aria-pressed={value.kind===kind} onClick={()=>setValue(old=>({...old,kind,...paths(kind)}))}><Server size={22}/><strong>{kind==='native'?'Nativ installiert':'Docker-Container'}</strong><span>{kind==='native'?'Dienst über systemd verwalten':'Agent auf dem Docker-Host installieren'}</span></button>)}</div>
       <Input label="Name in der Management-Oberfläche" required maxLength={120} placeholder="z. B. Edge Frankfurt" value={value.name} onChange={e=>update('name',e.target.value)}/>
+      <ClassificationFields value={value} onChange={next=>setValue({...value,...next})}/>
       <div className="modal-actions"><button type="button" className="button secondary" onClick={onExisting}>Agent bereits installiert</button><button type="submit" className="button">Weiter</button></div>
     </form>}
     {step===1&&<form onSubmit={e=>{e.preventDefault();void generate();}}>

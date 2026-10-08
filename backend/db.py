@@ -75,6 +75,13 @@ class Instance(Base):
     document_version: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
+class InstanceMetadata(Base):
+    __tablename__ = 'instance_metadata'
+    instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id',ondelete='CASCADE'),primary_key=True)
+    tags: Mapped[list] = mapped_column(JSON,default=list)
+    location: Mapped[str] = mapped_column(String(120),default='')
+    version: Mapped[int] = mapped_column(Integer,default=0)
+
 class Revision(Base):
     __tablename__ = 'revisions'
     id: Mapped[int] = mapped_column(primary_key=True)

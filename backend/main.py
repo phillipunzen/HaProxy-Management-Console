@@ -22,12 +22,12 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError,SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
+from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,InstanceMetadata,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
 from backend import metrics as metric_store
 from backend import topology as topology_store
 from backend import basic_auth,basic_auth_api
 from backend.settings import settings
-from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn,ImportedMap
+from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,InstanceMetadataIn,Document,DraftIn,CertificateIn,ImportedMap
 from backend.generator import generate
 from backend.agent_setup import AgentSetupIn, build_plan, build_update_command
 from backend.haproxy_config import import_config, enrich_stats, migration_context, MIGRATION_PREFIX
@@ -87,9 +87,22 @@ def instance(db,id):
     return value
 
 
-def public_instance(i):
+def public_instance(i,metadata=None):
     return {'id':i.id,'name':i.name,'agent_url':i.agent_url,'profile':i.profile,'kind':i.kind,'notes':i.notes,
-            'allow_http':i.allow_http,'created_at':i.created_at.isoformat()+'Z'}
+            'allow_http':i.allow_http,'created_at':i.created_at.isoformat()+'Z',
+            'tags':metadata.tags if metadata else [],'location':metadata.location if metadata else '',
+            'metadata_version':metadata.version if metadata else 0}
+
+
+def store_instance_metadata(db,id,body,check_version=True):
+    value=db.scalar(select(InstanceMetadata).where(InstanceMetadata.instance_id==id).with_for_update().execution_options(populate_existing=True))
+    if check_version and body.metadata_version!=(value.version if value else 0):
+        raise HTTPException(409,'Tags oder Standort wurden parallel geändert. Bitte neu laden.')
+    if not value:value=InstanceMetadata(instance_id=id,tags=[],location='',version=0);db.add(value)
+    for key in ('tags','location'):
+        if key in body.model_fields_set:setattr(value,key,getattr(body,key))
+    if check_version:value.version+=1
+    return value
 
 
 def agent(i,path='',method='GET',body=None,timeout=10):
@@ -303,8 +316,8 @@ def password(body:PasswordIn,request:Request,response:Response,user=Depends(curr
 @app.get('/api/instances')
 def list_instances(user=Depends(current_user),db=Depends(get_db)):
     out=[]
-    for i,metric in db.execute(select(Instance,MetricLatest).outerjoin(MetricLatest).order_by(Instance.id)):
-        out.append(public_instance(i)|{'stats':metric.data if metric else None,'collected_at':metric.collected_at.isoformat()+'Z' if metric else None,'fresh_for_seconds':max(90,settings.metrics_interval*3)})
+    for i,metric,metadata in db.execute(select(Instance,MetricLatest,InstanceMetadata).outerjoin(MetricLatest).outerjoin(InstanceMetadata).order_by(Instance.id)):
+        out.append(public_instance(i,metadata)|{'stats':metric.data if metric else None,'collected_at':metric.collected_at.isoformat()+'Z' if metric else None,'fresh_for_seconds':max(90,settings.metrics_interval*3)})
     return out
 
 @app.post('/api/instances')
@@ -314,8 +327,9 @@ def add_instance(body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
     i=Instance(name=body.name,agent_url=body.agent_url,profile=body.profile,allow_http=body.allow_http,
                notes=body.notes,token_cipher=cipher.encrypt(body.token.encode()).decode(),document=Document().model_dump())
     cap=agent(i);i.kind=cap['kind']
-    db.add(i);db.flush();audit(db,user.username,'instance.created',i.name);db.commit()
-    return public_instance(i)
+    db.add(i);db.flush();metadata=store_instance_metadata(db,i.id,body,check_version=False)
+    audit(db,user.username,'instance.created',i.name);db.commit()
+    return public_instance(i,metadata)
 
 @app.put('/api/instances/{id}')
 def edit_instance(id:int,body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
@@ -324,9 +338,24 @@ def edit_instance(id:int,body:InstanceIn,user=Depends(admin),db=Depends(get_db))
         raise HTTPException(409,'Dieses Agent-Profil ist bereits angebunden.')
     candidate=Instance(agent_url=body.agent_url,profile=body.profile,token_cipher=cipher.encrypt(body.token.encode()).decode())
     cap=agent(candidate)
+    db.rollback()
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
+    if not i:raise HTTPException(404,'Instanz wurde entfernt.')
+    metadata=store_instance_metadata(db,id,body) if {'tags','location'}&body.model_fields_set else db.get(InstanceMetadata,id)
     for key in ('name','agent_url','profile','allow_http','notes'): setattr(i,key,getattr(body,key))
     i.token_cipher=candidate.token_cipher;i.kind=cap['kind']
-    audit(db,user.username,'instance.updated',i.name);db.commit();return public_instance(i)
+    audit(db,user.username,'instance.updated',i.name);db.commit();return public_instance(i,metadata)
+
+@app.put('/api/instances/{id}/metadata')
+def edit_instance_metadata(id:int,body:InstanceMetadataIn,user=Depends(admin),db=Depends(get_db)):
+    # End the authentication snapshot before locking; metadata edits never call
+    # an agent and must also work when that HAProxy host is offline.
+    db.rollback()
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
+    if not i:raise HTTPException(404,'Instanz nicht gefunden.')
+    metadata=store_instance_metadata(db,id,body)
+    audit(db,user.username,'instance.metadata.updated',i.name);db.commit()
+    return public_instance(i,metadata)
 
 @app.delete('/api/instances/{id}')
 def remove_instance(id:int,user=Depends(admin),db=Depends(get_db)):

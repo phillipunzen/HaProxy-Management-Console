@@ -15,6 +15,7 @@ files = {
     'docs/METRICS.md': root / 'docs' / 'METRICS.md',
     'docs/TOPOLOGY.md': root / 'docs' / 'TOPOLOGY.md',
     'docs/BASIC_AUTH.md': root / 'docs' / 'BASIC_AUTH.md',
+    'docs/SERVERS.md': root / 'docs' / 'SERVERS.md',
     'requirements.txt': root / 'requirements.txt',
     'backend/__init__.py': root / 'backend' / '__init__.py',
     'backend/schemas.py': root / 'backend' / 'schemas.py',

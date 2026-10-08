@@ -3,7 +3,7 @@
 Stand: 8. Oktober 2026.
 
 - Frontend-Produktionsbuild mit TypeScript erfolgreich.
-- **144 Unit-Tests bestanden**, zusätzlich vier aktuelle Basic-Auth-Laufzeittests und zwei Migrationstests mit echten nativen und Docker-HAProxy-Instanzen. Die zuvor geprüften sechs Integrationstests für allgemeine Authentifizierung und Dienstaktionen sind unten beschrieben.
+- **160 Unit-Tests bestanden**, zusätzlich vier aktuelle Basic-Auth-Laufzeittests und zwei Migrationstests mit echten nativen und Docker-HAProxy-Instanzen. Die zuvor geprüften sechs Integrationstests für allgemeine Authentifizierung und Dienstaktionen sind unten beschrieben.
 - Unit-Tests für Konfigurationsgenerator, Eingabevalidierung, Agent-Authentifizierung, Konflikterkennung, lokale Wiederherstellung bei Reload-Fehlern, Zertifikat-/Schlüsselvergleich, Certbot-Aufrufe, Erneuerung geänderter Produktionszertifikate und HTTP-Challenge-Webroot.
 - Integrationstests an der angegebenen MariaDB und zwei isolierten echten HAProxy-Installationen: offizieller Docker-Container HAProxy 3.2.25 und natives HAProxy 3.0.11 mit eigener temporärer systemd-Unit. Prüfung generierter Hosts/Wildcards/ACLs/Redirects; Anwendung und Wiederherstellung von Revisionen; erfolgreicher Reload mit neuem Worker; Stop, Start, Restart; Login, CSRF, Rollenrechte, obligatorischer Passwortwechsel, Versionskonflikte.
 - Migrationstests: mehrere automatisch erkannte `-f`-Dateien und Verzeichnisse, Host-Map-Konvertierung, Erhaltung zusätzlicher Direktiven, Änderung einer Domain und eines Backend-Ports, echte HTTPS-Anfragen, TCP-Forwarding und Wiederherstellung der vorherigen Konfiguration. Externe Änderungen an weiteren Dateien bzw. Maps werden vor Übernahme und Anwendung erkannt; lokale Reload-Fehler stellen sämtliche Originaldateien wieder her.
@@ -37,3 +37,11 @@ Vier echte Laufzeittests prüfen jeweils native und Docker-HAProxy-Prozesse mit 
 Chromium auf Desktop und 390-Pixel-Mobilansicht prüft Gruppen-/Benutzerverwaltung, Passwortbeibehaltung, Deaktivierung, eigene und importierte Website-Zuordnungen, ausstehende Verteilung, Erzeugung ohne automatisches Anwenden und Operatorrechte.
 
 Zusätzliche API-Prüfung an einer isolierten MariaDB 11.8.6: fünf Szenarien für Benutzerverwaltung, Rollen, Gruppen, Versionskonflikte und Aktivierungsstatus bestanden. Zwei parallele Gruppenanlagen ergeben einmal HTTP 201 und einmal HTTP 409. Die Sperre beginnt mit einer frischen Transaktion, um veraltete Authentifizierungs-Snapshots bei MariaDB zu vermeiden. Testcontainer und Datenvolumes entfernt.
+
+## Server-Tags und Standorte
+
+16 zusätzliche Unit-Tests prüfen Unicode-/Leerzeichennormalisierung, doppelte Tags, Längen- und Mengengrenzen, ungültige Werte, bestehende Server ohne Zuordnung, Bearbeitung ohne Agent-Aufruf, Versionskonflikte, Rollen, CSRF, FK-Löschung und Kompatibilität mit älteren Clients. Der Einrichtungsassistent übernimmt die Zuordnungen in die Verbindungsdaten; sie stehen nicht im Installationsbefehl. Änderungen erzeugen keine Metrikzeilen und ändern weder Agent-Zugang noch HAProxy-Entwurf.
+
+Chromium auf Desktop und 390-Pixel-Mobilansicht: kombinierte Tag-/Standortfilter, Suche, Server ohne Standort, leere Trefferliste, Filter zurücksetzen, Zuordnung ohne Token, manuelle Texteingabe mehrerer Tags, Übernahme im Einrichtungsassistenten und Filter mit Viewerrechten.
+
+In einer isolierten MariaDB 11.8.6 bestanden fünf API-Szenarien, die Erweiterung eines Schemas mit vorhandenen Servern sowie zwei gleichzeitige Zuordnungsänderungen (HTTP 200 und HTTP 409). Vorhandene Notizen und Server blieben beim Erstellen der neuen Tabelle erhalten. Testcontainer und Datenvolumes wurden entfernt.

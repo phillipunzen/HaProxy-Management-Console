@@ -1,5 +1,7 @@
 # Docker-Installation
 
+Server lassen sich mit frei wählbaren Tags und einem Standort organisieren und filtern. Unter **Server → Tags & Standort** bearbeiten oder beim Verbinden direkt angeben. Die [Anleitung für Server-Zuordnungen](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/SERVERS.md) liegt im ZIP unter `docs/SERVERS.md`. Keine zusätzlichen ENV-Variablen erforderlich.
+
 Für zentral verwaltete Website-Zugänge unter **Basic Auth** Benutzer und Gruppen anlegen, unter **Proxy Hosts → Website-Zugang** zuordnen und die Konfiguration auf jeder betroffenen Instanz prüfen und anwenden. Die [Basic-Auth-Anleitung](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/BASIC_AUTH.md) beschreibt Passwortwechsel, Aktivierung und importierte Konfigurationen. Keine zusätzlichen ENV-Variablen erforderlich. Die Anleitung liegt im Docker-ZIP unter `docs/BASIC_AUTH.md`.
 
 Dieses Paket enthält `docker-compose.yml`, `.env.example`, diese Anleitung sowie die Agent-Dateien und `docs/AGENT.md` zum Verbinden nativer und Docker-basierter HAProxy-Server. Das Image enthält die fertige Webanwendung für Linux/amd64. Eine externe MariaDB und Docker mit Compose werden benötigt. Die Datenbank und der Datenbankbenutzer müssen vor dem ersten Start existieren; die Anwendung erstellt ihre Tabellen selbst.

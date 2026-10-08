@@ -1,5 +1,6 @@
 import ipaddress
 import re
+import unicodedata
 from typing import Literal
 from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -56,7 +57,31 @@ class BasicAuthGroupIn(BaseModel):
         if not re.fullmatch(r'[a-zA-Z0-9 .:@/_-]{1,80}',value):raise ValueError('Anmeldebereich: Buchstaben A–Z, Zahlen, Leerzeichen und . : @ / _ - verwenden.')
         return value
 
-class InstanceIn(BaseModel):
+class InstanceMetadataIn(BaseModel):
+    tags: list[str] = Field(default_factory=list,max_length=20)
+    location: str = Field(default='',max_length=120)
+    metadata_version: int = Field(default=0,ge=0)
+
+    @field_validator('tags')
+    @classmethod
+    def valid_tags(cls,values):
+        result=[];seen=set()
+        for value in values:
+            if any(unicodedata.category(c).startswith('C') for c in value) or ',' in value:
+                raise ValueError('Tags dürfen keine Kommas oder Steuerzeichen enthalten.')
+            value=unicodedata.normalize('NFC',' '.join(value.split()))
+            if not 1<=len(value)<=40:raise ValueError('Jeder Tag muss 1 bis 40 Zeichen lang sein.')
+            key=value.casefold()
+            if key not in seen:result.append(value);seen.add(key)
+        return result
+
+    @field_validator('location')
+    @classmethod
+    def valid_location(cls,value):
+        if any(unicodedata.category(c).startswith('C') for c in value):raise ValueError('Standort darf keine Steuerzeichen enthalten.')
+        return unicodedata.normalize('NFC',' '.join(value.split()))
+
+class InstanceIn(InstanceMetadataIn):
     name: str = Field(min_length=1, max_length=120)
     agent_url: str = Field(max_length=500)
     profile: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,80}$')
