@@ -1,0 +1,47 @@
+{
+  "profiles": {
+    "native": {
+      "kind": "native",
+      "token": "REPLACE_WITH_UNIQUE_RANDOM_TOKEN_AT_LEAST_32_CHARACTERS",
+      "service": "haproxy",
+      "haproxy_binary": "/usr/sbin/haproxy",
+      "config_path": "/etc/haproxy/haproxy.cfg",
+      "runtime_socket": "/run/haproxy/admin.sock",
+      "runtime_socket_config": "/run/haproxy/admin.sock",
+      "cert_dir": "/etc/haproxy/certs",
+      "cert_dir_config": "/etc/haproxy/certs",
+      "cert_uid": 0,
+      "cert_gid": 0,
+      "cert_mode": 384,
+      "acme_webroot": "/var/lib/haproxy-control/webroot",
+      "dns_providers": {
+        "cloudflare": {
+          "credentials_file": "/etc/haproxy-control/cloudflare.ini",
+          "propagation_seconds": 60
+        }
+      }
+    },
+    "docker-edge": {
+      "kind": "docker",
+      "token": "REPLACE_WITH_ANOTHER_UNIQUE_RANDOM_TOKEN_AT_LEAST_32_CHARACTERS",
+      "container": "haproxy",
+      "config_path": "/opt/haproxy/config/haproxy.cfg",
+      "container_config_dir": "/usr/local/etc/haproxy",
+      "runtime_socket": "/opt/haproxy/run/admin.sock",
+      "runtime_socket_config": "/run/haproxy/admin.sock",
+      "cert_dir": "/opt/haproxy/certs",
+      "cert_dir_config": "/etc/haproxy/certs",
+      "cert_uid": 99,
+      "cert_gid": 99,
+      "cert_mode": 416,
+      "reload_signal": "USR2",
+      "acme_webroot": "/var/lib/haproxy-control/webroot",
+      "dns_providers": {
+        "cloudflare": {
+          "credentials_file": "/etc/haproxy-control/cloudflare.ini",
+          "propagation_seconds": 60
+        }
+      }
+    }
+  }
+}

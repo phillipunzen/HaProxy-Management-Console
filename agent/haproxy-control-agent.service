@@ -1,0 +1,21 @@
+[Unit]
+Description=HAProxy Control Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/haproxy-management
+Environment=AGENT_CONFIG=/etc/haproxy-control/agent.json
+Environment=AGENT_STATE_DIR=/var/lib/haproxy-control
+ExecStart=/opt/haproxy-management/.venv/bin/uvicorn agent.main:app --host 127.0.0.1 --port 9101 --workers 1 --no-proxy-headers --no-access-log
+Restart=on-failure
+RestartSec=5
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=-/etc/haproxy -/etc/letsencrypt
+
+[Install]
+WantedBy=multi-user.target

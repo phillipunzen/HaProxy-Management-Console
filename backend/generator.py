@@ -1,0 +1,55 @@
+from backend.schemas import Document
+
+def address(host, port):
+    return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
+
+def generate(doc: Document, capabilities: dict) -> str:
+    socket = capabilities['runtime_socket_config']
+    cert_dir = capabilities['cert_dir_config']
+    for p in (socket, cert_dir):
+        if any(x.isspace() for x in p) or not p.startswith('/'):
+            raise ValueError('Agent-Pfade müssen absolute Pfade ohne Leerzeichen sein.')
+    out = ['# Managed by HAProxy Control', 'global', '    log stdout format raw local0',
+           f'    maxconn {doc.maxconn}', f'    stats socket {socket} mode 660 level admin',
+           '', 'defaults', '    mode http', '    log global', '    option httplog',
+           '    option dontlognull', '    timeout connect 5s', '    timeout client 60s',
+           '    timeout server 60s', '', 'frontend public_http', f'    bind :{doc.http_port}']
+    if doc.tls_enabled:
+        out += [f'    bind :{doc.https_port} ssl crt {cert_dir}/ alpn h2,http/1.1']
+    if doc.acme_enabled:
+        out += ['    acl acme_challenge path_beg /.well-known/acme-challenge/']
+    for rule in doc.rules:
+        if not rule.enabled:
+            continue
+        criterion = {'host':'hdr(host),field(1,:) -i','path_prefix':'path_beg','source_ip':'src','method':'method'}[rule.match]
+        out += [f'    acl rule_{rule.id} {criterion} {rule.value}']
+        condition = f'rule_{rule.id}' + (' !acme_challenge' if doc.acme_enabled else '')
+        if rule.action == 'deny':
+            out += [f'    http-request deny if {condition}']
+        elif rule.action == 'redirect':
+            out += [f'    http-request redirect location {rule.target} code {rule.code} if {condition}']
+        else:
+            name,value = rule.target.split(':',1)
+            out += [f'    http-request set-header {name} {value.strip()} if {condition}']
+    hosts = sorted((h for h in doc.hosts if h.enabled), key=lambda h: (-len(h.path), h.domain.startswith('*.')))
+    for host in hosts:
+        matcher = 'hdr_end(host),field(1,:) -i' if host.domain.startswith('*.') else 'hdr(host),field(1,:) -i'
+        domain = host.domain[1:] if host.domain.startswith('*.') else host.domain
+        out += [f'    acl host_{host.id} {matcher} {domain}', f'    acl path_{host.id} path_beg {host.path}']
+        if host.force_https:
+            out += [f'    http-request redirect scheme https code 301 if host_{host.id} path_{host.id} !{{ ssl_fc }}' + (' !acme_challenge' if doc.acme_enabled else '')]
+    if doc.acme_enabled:
+        out += ['    use_backend acme_webroot if acme_challenge']
+    for host in hosts:
+        out += [f'    use_backend backend_{host.id} if host_{host.id} path_{host.id}']
+    out += ['    default_backend unknown_host', '', 'backend unknown_host', '    http-request deny deny_status 404']
+    if doc.acme_enabled:
+        out += ['', 'backend acme_webroot', f'    server acme {address(doc.acme_address,doc.acme_port)}']
+    for host in hosts:
+        out += ['', f'backend backend_{host.id}', f'    balance {host.balance}']
+        for i, server in enumerate(host.servers):
+            tls = ' ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt' if server.tls else ''
+            if server.tls and ':' not in server.address and not server.address.replace('.', '').isdigit():
+                tls += f' sni str({server.address}) verifyhost {server.address}'
+            out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
+    return '\n'.join(out) + '\n'

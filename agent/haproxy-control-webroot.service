@@ -1,0 +1,18 @@
+[Unit]
+Description=HAProxy Control HTTP-01 Webroot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/haproxy-management
+Environment=ACME_WEBROOT=/var/lib/haproxy-control/webroot
+ExecStart=/opt/haproxy-management/.venv/bin/uvicorn agent.challenge:app --host 127.0.0.1 --port 8888 --workers 1 --no-proxy-headers --no-access-log
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
