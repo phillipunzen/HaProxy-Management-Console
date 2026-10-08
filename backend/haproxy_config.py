@@ -218,6 +218,7 @@ def extract_backends(config):
 
 def import_config(config, active_hash, maps=None, sources=None, map_hashes=None):
     from backend.schemas import Document
+    from backend.basic_auth import restore_routes
     backends,warnings=extract_backends(config)
     proxies=inventory(config)
     rules,routes,map_warnings=map_routes(config,maps or [])
@@ -226,9 +227,9 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
         if route.backend not in known:warnings.append(f'{route.domain}: Backend {route.backend} fehlt in den eingelesenen Dateien.')
     for rule in rules:
         if rule['default'] and rule['default'] not in known:warnings.append(f'{rule["frontend"]}: Fallback {rule["default"]} fehlt in den eingelesenen Dateien.')
-    return {'document':Document(imported_config=config,imported_active_hash=active_hash,imported_backends=backends,
+    return {'document':restore_routes(Document(imported_config=config,imported_active_hash=active_hash,imported_backends=backends,
                                imported_routes=routes,imported_route_frontends=list(dict.fromkeys(r['frontend'] for r in rules)),imported_maps=maps or [],imported_sources=sources or [],
-                               imported_map_hashes=map_hashes or []).model_dump(),
+                               imported_map_hashes=map_hashes or [])).model_dump(),
             'proxies':proxies,'warnings':warnings+map_warnings,
             'summary':{'frontends':sum(p['kind'] in ('frontend','listen') for p in proxies),
                        'backends':sum(p['kind'] in ('backend','listen') for p in proxies),

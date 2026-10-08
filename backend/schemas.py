@@ -25,6 +25,37 @@ class UserIn(BaseModel):
     password: str = Field(min_length=10, max_length=200)
     role: Literal['admin', 'operator', 'viewer']
 
+class BasicAuthUserIn(BaseModel):
+    username: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,80}$')
+    password: str | None = Field(default=None,min_length=10,max_length=200)
+    enabled: bool = True
+    group_ids: list[int] = Field(default_factory=list,max_length=200)
+    version: int = Field(default=0,ge=0)
+
+    @model_validator(mode='after')
+    def valid(self):
+        if len(set(self.group_ids))!=len(self.group_ids) or any(id<1 for id in self.group_ids):raise ValueError('Gruppen-IDs müssen positiv und eindeutig sein.')
+        if self.password and ('\x00' in self.password or len(self.password.encode())>512):raise ValueError('Passwort darf kein NUL-Zeichen enthalten und höchstens 512 UTF-8-Bytes lang sein.')
+        return self
+
+class BasicAuthGroupIn(BaseModel):
+    name: str = Field(min_length=1,max_length=120)
+    realm: str = Field(default='Restricted',min_length=1,max_length=80)
+    description: str = Field(default='',max_length=500)
+    version: int = Field(default=0,ge=0)
+
+    @field_validator('name')
+    @classmethod
+    def valid_name(cls,value):
+        if not value.strip() or any(ord(c)<32 for c in value):raise ValueError('Bitte einen Gruppennamen ohne Steuerzeichen eingeben.')
+        return value.strip()
+
+    @field_validator('realm')
+    @classmethod
+    def valid_realm(cls,value):
+        if not re.fullmatch(r'[a-zA-Z0-9 .:@/_-]{1,80}',value):raise ValueError('Anmeldebereich: Buchstaben A–Z, Zahlen, Leerzeichen und . : @ / _ - verwenden.')
+        return value
+
 class InstanceIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     agent_url: str = Field(max_length=500)
@@ -69,6 +100,8 @@ class Host(BaseModel):
     force_https: bool = False
     balance: Literal['roundrobin', 'leastconn', 'source'] = 'roundrobin'
     servers: list[BackendServer] = Field(min_length=1, max_length=30)
+    basic_auth_group: int | None = Field(default=None,ge=1)
+    basic_auth_forward: bool = False
 
     @field_validator('domain')
     @classmethod
@@ -135,6 +168,8 @@ class ImportedRoute(BaseModel):
     frontend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     domain: str = Field(max_length=253)
     backend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    basic_auth_group: int | None = Field(default=None,ge=1)
+    basic_auth_forward: bool = False
 
     @field_validator('domain')
     @classmethod

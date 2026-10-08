@@ -28,6 +28,39 @@ class LoginSession(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
+class BasicAuthUser(Base):
+    __tablename__ = 'basic_auth_users'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(80),unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    enabled: Mapped[bool] = mapped_column(Boolean,default=True)
+    version: Mapped[int] = mapped_column(Integer,default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime,default=now)
+
+class BasicAuthDirectory(Base):
+    __tablename__ = 'basic_auth_directory'
+    id: Mapped[int] = mapped_column(primary_key=True,default=1)
+    version: Mapped[int] = mapped_column(Integer,default=0)
+
+class BasicAuthGroup(Base):
+    __tablename__ = 'basic_auth_groups'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120),unique=True)
+    realm: Mapped[str] = mapped_column(String(80),default='Restricted')
+    description: Mapped[str] = mapped_column(String(500),default='')
+    version: Mapped[int] = mapped_column(Integer,default=0)
+
+class BasicAuthMembership(Base):
+    __tablename__ = 'basic_auth_memberships'
+    user_id: Mapped[int] = mapped_column(ForeignKey('basic_auth_users.id',ondelete='CASCADE'),primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey('basic_auth_groups.id',ondelete='CASCADE'),primary_key=True)
+
+class BasicAuthDeployment(Base):
+    __tablename__ = 'basic_auth_deployments'
+    instance_id: Mapped[int] = mapped_column(ForeignKey('instances.id',ondelete='CASCADE'),primary_key=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON,default=dict)
+    applied_at: Mapped[datetime] = mapped_column(DateTime,default=now)
+
 class Instance(Base):
     __tablename__ = 'instances'
     id: Mapped[int] = mapped_column(primary_key=True)

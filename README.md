@@ -57,6 +57,7 @@ Für Updates `docker compose -f compose.registry.yaml pull` und danach `docker c
 
 - Login mit Argon2id-Passwörtern, serverseitigen Sitzungen, HttpOnly-Cookie, CSRF-Prüfung und Anmeldebegrenzung; Passwortwechsel invalidiert sämtliche Sitzungen.
 - Benutzerrollen: Admin (alle Rechte), Operator (Konfiguration, Zertifikate, Reload/Start/Restart), Viewer (Statistiken und Zertifikatsmetadaten).
+- Zentrale Basic-Auth-Benutzer und Gruppen für einzelne HTTP-/HTTPS-Websites, auch bei importierten Domain-Routen und gemeinsamen Backends. Passwörter ab 10 Zeichen, gesalzene Hashes, Benutzer deaktivieren und ausstehende Änderungen pro Instanz aktivieren. [Einrichtung und Aktivierung](docs/BASIC_AUTH.md).
 - Mehrere Agent-Profile mit verschlüsselten Zugangstokens; native systemd-Dienste und Docker-Container.
 - Grafischer Entwurf für Domains/Wildcards, Pfadrouting, mehrere Backends, Gewichte, Healthchecks, Round Robin/Least Connections/Source und geprüfte TLS-Verbindungen zum Backend.
 - HTTP-/HTTPS-Listener, HTTPS-Weiterleitungen, ACLs für Host, Pfad, IP-Netze und Methoden, feste URL-Redirects und Request-Header.

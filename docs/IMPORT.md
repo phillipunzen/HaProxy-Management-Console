@@ -1,5 +1,7 @@
 # Vorhandene Konfiguration übernehmen
 
+Grafisch bearbeitbaren HTTP-Domain-Zuordnungen lässt sich unter **Website-Zugang** eine zentrale Basic-Auth-Gruppe zuweisen. Bestehende eigene Benutzerlisten bleiben im Text erhalten; sie werden nicht automatisch in die zentrale Verwaltung übernommen. Vom Programm erzeugte Authentifizierungszuordnungen bleiben beim erneuten Import erhalten. Details: [Zentrale Basic-Auth-Benutzer](BASIC_AUTH.md).
+
 Die Migration liest vorhandene HAProxy-Dateien in einen grafischen Entwurf ein. Sie startet keinen Reload. Erst **Konfiguration erzeugen → Prüfen & anwenden** aktiviert Änderungen auf der gewählten Instanz.
 
 ## 1. Agent vorbereiten

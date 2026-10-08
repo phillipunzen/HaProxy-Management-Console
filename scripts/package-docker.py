@@ -14,10 +14,12 @@ files = {
     'docs/IMPORT.md': root / 'docs' / 'IMPORT.md',
     'docs/METRICS.md': root / 'docs' / 'METRICS.md',
     'docs/TOPOLOGY.md': root / 'docs' / 'TOPOLOGY.md',
+    'docs/BASIC_AUTH.md': root / 'docs' / 'BASIC_AUTH.md',
     'requirements.txt': root / 'requirements.txt',
     'backend/__init__.py': root / 'backend' / '__init__.py',
     'backend/schemas.py': root / 'backend' / 'schemas.py',
     'backend/haproxy_config.py': root / 'backend' / 'haproxy_config.py',
+    'backend/basic_auth.py': root / 'backend' / 'basic_auth.py',
 }
 for name in ('__init__.py', 'main.py', 'config_bundle.py', 'config.example.json',
              'haproxy-control-agent.service', 'haproxy-control-webroot.service'):

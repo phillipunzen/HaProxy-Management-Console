@@ -16,7 +16,8 @@ LABEL org.opencontainers.image.title="HAProxy Management Console" \
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home control
+RUN apt-get update && apt-get install -y --no-install-recommends libcrypt1 && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home control
 COPY backend/ ./backend/
 COPY agent/ ./agent/
 COPY docs/AGENT.md ./docs/AGENT.md

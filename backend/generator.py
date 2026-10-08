@@ -3,10 +3,11 @@ from backend.schemas import Document
 def address(host, port):
     return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
 
-def generate(doc: Document, capabilities: dict) -> str:
+def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
+    from backend.basic_auth import inject
     if doc.imported_config is not None:
         from backend.haproxy_config import generate_imported
-        return generate_imported(doc)
+        return inject(generate_imported(doc),doc,basic_auth)
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):
@@ -55,4 +56,4 @@ def generate(doc: Document, capabilities: dict) -> str:
             if server.tls and ':' not in server.address and not server.address.replace('.', '').isdigit():
                 tls += f' sni str({server.address}) verifyhost {server.address}'
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
-    return '\n'.join(out) + '\n'
+    return inject('\n'.join(out) + '\n',doc,basic_auth)

@@ -22,9 +22,10 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError,SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,MetricLatest,Audit
+from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
 from backend import metrics as metric_store
 from backend import topology as topology_store
+from backend import basic_auth,basic_auth_api
 from backend.settings import settings
 from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn,ImportedMap
 from backend.generator import generate
@@ -148,11 +149,13 @@ async def lifespan(app):
             db.add(User(username=settings.admin_username,password_hash=ph.hash(settings.admin_password),role='admin'))
             audit(db,'system','admin.bootstrap',settings.admin_username)
             db.commit()
+        if not db.get(BasicAuthDirectory,1):db.add(BasicAuthDirectory(id=1));db.commit()
     task=asyncio.create_task(metric_loop())
     yield
     task.cancel()
 
 app=FastAPI(title='HAProxy Control',version='0.1.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+app.include_router(basic_auth_api.router(admin,operator,audit))
 
 SETUP_ROOT = Path(__file__).resolve().parent.parent
 
@@ -218,6 +221,9 @@ def commit_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(ge
     i=instance(db,id);preview=import_preview_for(i,body)
     if body.active_hash!=preview['active_hash']:raise HTTPException(409,'Aktive Hauptdatei wurde geändert; Vorschau erneut laden.')
     if body.preview_hash!=preview['preview_hash']:raise HTTPException(409,'Dateien, Maps oder Import-Inhalt wurden geändert; Vorschau erneut laden.')
+    basic_auth.lock_directory(db)
+    try:basic_auth.validate_document(db,Document.model_validate(preview['document']))
+    except ValueError as error:raise HTTPException(422,str(error))
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i:raise HTTPException(404,'Instanz wurde entfernt.')
     if i.document_version!=body.document_version:raise HTTPException(409,'Grafischer Entwurf wurde parallel geändert; Vorschau erneut laden.')
@@ -338,7 +344,10 @@ def document(id:int,user=Depends(operator),db=Depends(get_db)):
 
 @app.put('/api/instances/{id}/document')
 def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)):
-    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update())
+    basic_auth.lock_directory(db)
+    try:basic_auth.validate_document(db,body)
+    except ValueError as error:raise HTTPException(422,str(error))
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i: raise HTTPException(404)
     if body.version!=i.document_version: raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
     i.document=body.model_dump(exclude={'version'});i.document_version+=1
@@ -356,7 +365,8 @@ def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
                 bundle=agent(i,'/config-bundle')
                 if {s.path:s.hash for s in doc.imported_sources}!={s['path']:s['hash'] for s in bundle['sources']} or {m.path:m.hash for m in doc.imported_map_hashes}!={m['host_path']:m['hash'] for m in bundle['maps']}:
                     raise HTTPException(409,'Eine Konfigurations- oder Map-Datei wurde geändert. Erneut importieren.')
-        config=generate(doc,cap)
+        config=generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc)))
+        if len(config.encode())>1024*1024:raise ValueError('Erzeugte Konfiguration mit Basic-Auth-Benutzern ist größer als 1 MB.')
     except ValueError as e: raise HTTPException(422,str(e))
     return {'config':config,'base_hash':current['hash']}
 
@@ -387,6 +397,8 @@ def apply_revision(id:int,rev:int,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);r=db.scalar(select(Revision).where(Revision.id==rev).with_for_update())
     if not r or r.instance_id!=id: raise HTTPException(404)
     if r.status in ('applied','applying','uncertain'): raise HTTPException(409,'Diese Version wurde bereits angewendet. Für einen Rollback als neuen Entwurf laden.')
+    try:auth_metadata=basic_auth.assert_current(db,r.config)
+    except ValueError as error:raise HTTPException(409,str(error))
     # Persist the previous configuration before executing the remote mutation.
     previous=agent(i,'/config')
     if previous['hash']!=r.base_hash: raise HTTPException(409,'Aktive Konfiguration wurde geändert. Neu laden und abgleichen.')
@@ -407,13 +419,19 @@ def apply_revision(id:int,rev:int,user=Depends(operator),db=Depends(get_db)):
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i:raise HTTPException(404,'Instanz wurde während des Anwendens entfernt.')
     if i.document.get('imported_config') is not None:
-        try:matches=generate(Document.model_validate(i.document),{})==r.config
+        try:
+            doc=Document.model_validate(i.document)
+            matches=generate(doc,{},basic_auth.snapshots(db,basic_auth.ids(doc)))==r.config
         except ValueError:matches=False
         if matches:
             document=dict(i.document);document['imported_active_hash']=result['hash']
             if result.get('sources') is not None:
                 document['imported_sources']=result['sources'];document['imported_map_hashes']=result['map_hashes']
             i.document=document;i.document_version+=1
+    deployment=db.get(BasicAuthDeployment,id)
+    if auth_metadata or deployment:
+        if not deployment:deployment=BasicAuthDeployment(instance_id=id);db.add(deployment)
+        deployment.metadata_json=auth_metadata or {};deployment.applied_at=now()
     audit(db,user.username,'revision.applied',i.name,str(rev));db.commit()
     return result
 
