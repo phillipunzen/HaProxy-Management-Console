@@ -120,6 +120,51 @@ class Rule(BaseModel):
             single(value.strip())
         return self
 
+class ImportedServer(BackendServer):
+    name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    weight: int = Field(default=1,ge=0,le=256)
+
+class ImportedBackend(BaseModel):
+    name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    mode: Literal['http','tcp','unknown']
+    balance: Literal['roundrobin','leastconn','source'] | None = 'roundrobin'
+    servers: list[ImportedServer] = Field(max_length=500)
+
+class ImportedRoute(BaseModel):
+    id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,80}$')
+    frontend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    domain: str = Field(max_length=253)
+    backend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+
+    @field_validator('domain')
+    @classmethod
+    def valid_domain(cls,value):
+        value=Host.domain_ok(value)
+        if value.startswith('*.'):raise ValueError('Host-Maps verwenden hier exakte Domains, keine Wildcards.')
+        return value
+
+class ImportedMap(BaseModel):
+    path: str = Field(max_length=1000)
+    content: str = Field(max_length=256*1024)
+
+    @field_validator('path')
+    @classmethod
+    def absolute_path(cls,value):
+        if not value.startswith('/') or '..' in value.split('/') or any(c.isspace() for c in value):
+            raise ValueError('Map-Pfad muss absolut sein und darf kein .. enthalten.')
+        return value
+
+class ImportedSource(BaseModel):
+    path: str = Field(max_length=1000)
+    hash: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+    @field_validator('path')
+    @classmethod
+    def absolute_path(cls,value):
+        if not value.startswith('/') or '..' in value.split('/') or '\x00' in value:
+            raise ValueError('Dateipfad muss absolut sein und darf kein .. enthalten.')
+        return value
+
 class Document(BaseModel):
     http_port: int = Field(default=80, ge=1, le=65535)
     https_port: int = Field(default=443, ge=1, le=65535)
@@ -131,6 +176,14 @@ class Document(BaseModel):
     hosts: list[Host] = Field(default_factory=list, max_length=200)
     rules: list[Rule] = Field(default_factory=list, max_length=200)
     version: int = 0
+    imported_config: str | None = Field(default=None,max_length=1024*1024)
+    imported_active_hash: str | None = Field(default=None,pattern=r'^[a-f0-9]{64}$')
+    imported_backends: list[ImportedBackend] = Field(default_factory=list,max_length=500)
+    imported_routes: list[ImportedRoute] = Field(default_factory=list,max_length=2000)
+    imported_route_frontends: list[str] = Field(default_factory=list,max_length=500)
+    imported_maps: list[ImportedMap] = Field(default_factory=list,max_length=100)
+    imported_sources: list[ImportedSource] = Field(default_factory=list,max_length=200)
+    imported_map_hashes: list[ImportedSource] = Field(default_factory=list,max_length=100)
 
     @field_validator('acme_address')
     @classmethod
@@ -139,9 +192,22 @@ class Document(BaseModel):
 
     @model_validator(mode='after')
     def unique_ids(self):
-        for items in (self.hosts, self.rules):
+        for items in (self.hosts, self.rules, self.imported_routes):
             if len({x.id for x in items}) != len(items):
                 raise ValueError('IDs müssen eindeutig sein.')
+        if self.imported_config is not None and not self.imported_active_hash:
+            raise ValueError('Für übernommene Konfigurationen wird der aktive Datei-Hash benötigt.')
+        if len({b.name for b in self.imported_backends})!=len(self.imported_backends):
+            raise ValueError('Übernommene Backend-Namen müssen eindeutig sein.')
+        for b in self.imported_backends:
+            if len({s.name for s in b.servers})!=len(b.servers):
+                raise ValueError('Übernommene Servernamen müssen eindeutig sein.')
+        if len({(r.frontend,r.domain) for r in self.imported_routes})!=len(self.imported_routes):
+            raise ValueError('Domains müssen pro Frontend eindeutig sein.')
+        for items in (self.imported_sources,self.imported_map_hashes,self.imported_maps):
+            if len({s.path for s in items})!=len(items):raise ValueError('Dateipfade müssen eindeutig sein.')
+        if sum(len(m.content) for m in self.imported_maps)>1024*1024:
+            raise ValueError('Map-Dateien zusammen höchstens 1 MB groß.')
         if self.tls_enabled and self.http_port == self.https_port:
             raise ValueError('HTTP und HTTPS benötigen verschiedene Ports.')
         if not self.tls_enabled and any(h.enabled and h.force_https for h in self.hosts):

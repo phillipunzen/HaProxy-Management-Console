@@ -63,7 +63,8 @@ Für Updates `docker compose -f compose.registry.yaml pull` und danach `docker c
 - Vollständiger Konfigurationseditor mit Vergleich zur aktiven Datei, Export, Validierung, Entwürfen, Versionshistorie und Wiederherstellung als neuer Entwurf.
 - Geprüftes Anwenden: `haproxy -c`, externe Änderungen per Hash erkennen, alte Version sichern, Datei atomar wechseln, Reload und neuen Worker bestätigen. Fehler lösen eine Wiederherstellung aus; Netzwerkfehler werden als unklarer Status dokumentiert.
 - Let's Encrypt über Certbot: HTTP-01, Cloudflare DNS-01, mehrere Domains und Wildcards; getrennte Staging-Zertifikate; PEM-Import mit Schlüsselvergleich; Erneuerungsprüfung alle 12 Stunden auf dem Agenten.
-- Runtime-Statistiken, Frontends/Backends, Sessions, HTTP-Raten/Fehler, Traffic und Messwertverlauf mit 7 Tagen Aufbewahrung; Sammlung alle 30 Sekunden.
+- Runtime-Statistiken mit getrennten Frontends, Backend-Pools und Zielservern; HTTP/HTTPS, TCP/TLS-Passthrough, Prometheus und Statistikdienst, Protokollfilter und Suche. Sessions, HTTP-Raten/Fehler, Traffic und Verlauf mit 7 Tagen Aufbewahrung; Sammlung alle 30 Sekunden.
+- Import vorhandener Konfigurationen einschließlich mehrerer geladener Dateien und Host-Maps: Vorschau, grafisch bearbeitbare Domain-Zuordnungen und HTTP-/TCP-Backend-Ziele; unbekannte Direktiven bleiben im Text erhalten. Gemeinsame Dateisicherung und Wiederherstellung bei Fehlern.
 - Aktivitätsprotokoll für Anmeldung und Änderungen.
 
 ## Neues Deployment
@@ -108,9 +109,13 @@ Die [vollständige Schritt-für-Schritt-Anleitung](docs/AGENT.md) enthält Insta
 
 ## Konfiguration bearbeiten
 
-Bei bestehenden HAProxy-Servern zuerst **Konfiguration** öffnen: die aktive Konfiguration wird vollständig geladen. Dort Änderungen direkt vornehmen, prüfen, als Version speichern und anwenden.
+Bei bestehenden HAProxy-Servern **Proxy Hosts → Vorhandene Config einlesen** wählen. Der aktuelle Agent liest die geladenen Konfigurationsdateien und referenzierten Host-Maps. Die Vorschau unterscheidet HTTP-Reverse-Proxys, TCP-Pools, Prometheus und HAProxy-Stats. **Als grafischen Entwurf übernehmen** aktiviert noch keine Änderung am Dienst.
 
-Der grafische Editor ist ein eigener, persistenter Entwurf. Er importiert vorhandene komplexe Konfigurationen nicht automatisch. **Konfiguration erzeugen** erstellt die vollständige Konfiguration aus Hosts, Regeln und Listenern; dabei werden manuelle Einstellungen nicht übernommen. Ein Dialog weist darauf hin. Im Konfigurationseditor beide Fassungen vergleichen und erst anschließend anwenden. HTTPS erst einschalten, wenn im Zertifikatsverzeichnis ein gültiges Produktionszertifikat liegt. Der HAProxy-Check blockiert fehlerhafte Konfigurationen.
+Domain-Zuordnungen aus einfachen Host-Maps und Host-ACLs sowie statische Backend-Ziele werden grafisch bearbeitbar. Globale Einstellungen, Header, Redirects, Authentifizierung und Sonderregeln bleiben erhalten. **Konfiguration erzeugen** setzt die Änderungen in den eingelesenen Text ein. Im Editor vergleichen, prüfen und anwenden. Bei mehreren geladenen Dateien werden die Abschnitte beim Anwenden in der Hauptdatei zusammengeführt; alle Originaldateien werden gesichert. Die [Import-Anleitung](docs/IMPORT.md) beschreibt Voraussetzungen, Grenzen und Wiederherstellung.
+
+Einen bestehenden Agenten unter **Server → Agent aktualisieren** aktualisieren und den erzeugten Befehl auf dem HAProxy-Host ausführen. Bei eigener Dateistruktur gegebenenfalls `config_sources` und `map_dirs` im Agent-Profil setzen.
+
+Für eine neue Konfiguration ohne Import erzeugt der grafische Editor die vollständige Datei aus Hosts, Regeln und Listenern. Manuelle Einstellungen werden in diesem Modus nicht übernommen; ein Dialog weist darauf hin. HTTPS erst einschalten, wenn im Zertifikatsverzeichnis ein gültiges Produktionszertifikat liegt. Der HAProxy-Check blockiert fehlerhafte Konfigurationen.
 
 Rollback: vorherige Version in der Historie **Als Entwurf laden**, prüfen und anwenden. Dadurch werden auch zwischenzeitliche externe Änderungen erkannt. Bei unbekanntem Status zuerst aktive Konfiguration und Dienst prüfen; nicht blind erneut anwenden.
 
@@ -133,7 +138,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 npm ci --prefix frontend
 npm run build --prefix frontend
-.venv/bin/python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py -q
+.venv/bin/python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py tests/test_agent_setup.py tests/test_agent_installer.py tests/test_config_import.py -q
 .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8100
 ```
 
@@ -143,4 +148,4 @@ Für UI-Entwicklung: `npm run dev --prefix frontend`; Vite leitet `/api` an `127
 
 ## Grenzen der ersten Version
 
-Es gibt keine automatische Konfigurationssynchronisation oder Zertifikatsverteilung zwischen Agent-Hosts, kein Parsing beliebiger HAProxy-Konfigurationen zurück in den grafischen Editor und keine automatische Übernahme von TCP-/UDP-Frontends in Formularen. Der Konfigurationseditor unterstützt eigene HAProxy-Syntax; Validierung erfolgt auf dem Zielserver. Zertifikatsausstellung braucht echte Domain-/DNS-Voraussetzungen und den Cloudflare-Token auf dem Agenten. Automatische Erneuerung gilt für mit dieser Anwendung ausgestellte Produktionszertifikate; importierte PEMs müssen extern erneuert werden. Fehler der automatischen Agent-Erneuerung stehen im Agent-Journal; eine zentrale Benachrichtigungsintegration ist noch nicht vorhanden.
+Es gibt keine automatische Konfigurationssynchronisation oder Zertifikatsverteilung zwischen Agent-Hosts, keine vollständige grafische Abbildung beliebiger HAProxy-Syntax und keine Formularverwaltung neuer TCP-/UDP-Listener. Der Import übernimmt unterstützte Domain-Routen und HTTP-/TCP-Backend-Ziele; übrige Syntax bleibt im Text erhalten. Der Konfigurationseditor unterstützt eigene HAProxy-Syntax; Validierung erfolgt auf dem Zielserver. Zertifikatsausstellung braucht echte Domain-/DNS-Voraussetzungen und den Cloudflare-Token auf dem Agenten. Automatische Erneuerung gilt für mit dieser Anwendung ausgestellte Produktionszertifikate; importierte PEMs müssen extern erneuert werden. Fehler der automatischen Agent-Erneuerung stehen im Agent-Journal; eine zentrale Benachrichtigungsintegration ist noch nicht vorhanden.

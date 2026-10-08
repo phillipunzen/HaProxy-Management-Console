@@ -59,6 +59,25 @@ class AgentSetupIn(BaseModel):
         return self
 
 
+def installation_command(origin: str, root: Path, environment: str):
+    origin=origin.rstrip('/')
+    installer_hash=hashlib.sha256((root/'scripts/install-agent.sh').read_bytes()).hexdigest()
+    package_hash=hashlib.sha256((root/'downloads/haproxy-management-docker.zip').read_bytes()).hexdigest()
+    q=shlex.quote
+    return (
+        '( set -e; haproxy_setup_dir=$(mktemp -d); '
+        'trap \'rm -rf "$haproxy_setup_dir"\' EXIT; '
+        f'curl -fsSL {q(origin + "/api/agent-installer")} -o "$haproxy_setup_dir/install.sh"; '
+        f'printf \'%s  %s\\n\' {q(installer_hash)} "$haproxy_setup_dir/install.sh" | sha256sum -c -; '
+        f'sudo env {environment} HAPROXY_SOURCE_URL={q(origin)} '
+        f'HAPROXY_PACKAGE_SHA256={q(package_hash)} bash "$haproxy_setup_dir/install.sh" )'
+    )
+
+
+def build_update_command(origin: str, root: Path):
+    return {'command':installation_command(origin,root,'HAPROXY_AGENT_UPDATE_ONLY=1')}
+
+
 def build_plan(body: AgentSetupIn, origin: str, root: Path):
     template = json.loads((root / 'agent/config.example.json').read_text())
     profile = template['profiles']['native' if body.kind == 'native' else 'docker-edge'].copy()
@@ -72,18 +91,7 @@ def build_plan(body: AgentSetupIn, origin: str, root: Path):
         profile['container_config_dir'] = body.container_config_dir
     setup = {'profile_name': body.profile, 'profile': profile, 'bind': body.host, 'port': body.port}
     encoded = base64.b64encode(json.dumps(setup).encode()).decode()
-    origin = origin.rstrip('/')
-    installer_hash = hashlib.sha256((root / 'scripts/install-agent.sh').read_bytes()).hexdigest()
-    package_hash = hashlib.sha256((root / 'downloads/haproxy-management-docker.zip').read_bytes()).hexdigest()
-    q = shlex.quote
-    command = (
-        '( set -e; haproxy_setup_dir=$(mktemp -d); '
-        'trap \'rm -rf "$haproxy_setup_dir"\' EXIT; '
-        f'curl -fsSL {q(origin + "/api/agent-installer")} -o "$haproxy_setup_dir/install.sh"; '
-        f'printf \'%s  %s\\n\' {q(installer_hash)} "$haproxy_setup_dir/install.sh" | sha256sum -c -; '
-        f'sudo env HAPROXY_AGENT_SETUP_B64={q(encoded)} HAPROXY_SOURCE_URL={q(origin)} '
-        f'HAPROXY_PACKAGE_SHA256={q(package_hash)} bash "$haproxy_setup_dir/install.sh" )'
-    )
+    command=installation_command(origin,root,'HAPROXY_AGENT_SETUP_B64='+shlex.quote(encoded))
     host = f'[{body.host}]' if ':' in body.host else body.host
     return {'command': command, 'instance': {'name': body.name, 'agent_url': f'http://{host}:{body.port}',
             'profile': body.profile, 'token': profile['token'], 'allow_http': True, 'notes': ''}}

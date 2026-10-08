@@ -100,3 +100,7 @@ docker compose -f docker-compose.yml down
 Nach Änderungen an `.env` ebenfalls `up -d` ausführen. Die Daten liegen in MariaDB; `.env` enthält den Schlüssel zum Entschlüsseln gespeicherter Agent-Tokens. MariaDB und `.env` separat sichern. Bei Updates keine neuen Schlüssel erzeugen.
 
 Der Container läuft ohne Root-Rechte, mit schreibgeschütztem Dateisystem und ohne Docker-Socket. Das Image ist öffentlich über `ghcr.io/phillipunzen/haproxy-management-console` verfügbar.
+
+## Vorhandene HAProxy-Konfiguration importieren
+
+Nach dem Verbinden des Hosts unter **Proxy Hosts → Vorhandene Config einlesen** den Agenten als Quelle wählen oder Konfigurationsdateien und Maps hochladen. Der Import erstellt einen Entwurf; erst Prüfen und Anwenden aktiviert ihn. Bei bestehenden Agenten zuvor unter **Server → Agent aktualisieren** den Befehl erstellen und auf dem HAProxy-Host ausführen. Die beiliegende [Import-Anleitung](IMPORT.md) beschreibt mehrere Dateien, Domain-Maps, TCP-Pools und Sicherungen.

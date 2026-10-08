@@ -310,3 +310,9 @@ Agent-State unter `/var/lib/haproxy-control` enthält Zertifikat-Zuordnungen, Lo
 Zertifikate werden auf dem jeweiligen Agent-Host ausgestellt und gespeichert. Es gibt keinen automatischen Zertifikatsschlüssel-Transfer zwischen unabhängigen Agent-Hosts. Für denselben Hostnamen auf mehreren HAProxy-Servern entweder auf jedem Host ausstellen oder Zertifikate gezielt per PEM importieren. DNS-01 ist meist einfacher für HA-Setups. Agent-Profile für Container oder Dienste, die eine gemeinsame Konfigurationsdatei verwenden, sind nicht unterstützt: pro Datei und Socket genau ein Profil anlegen.
 
 Referenzen: [HAProxy Runtime API](https://www.haproxy.com/documentation/haproxy-runtime-api/), [offizieller Docker-Entrypoint für HAProxy 3.2](https://github.com/docker-library/haproxy/blob/master/3.2/docker-entrypoint.sh), [Certbot-Benutzerhandbuch](https://eff-certbot.readthedocs.io/en/stable/using.html), [Cloudflare-Plugin](https://certbot-dns-cloudflare.readthedocs.io/en/stable/).
+
+## Bestehende Dateien und Agent-Updates
+
+Die WebUI bietet unter **Server → Agent aktualisieren** einen checksum-geprüften Aktualisierungsbefehl für bestehende systemd-Agenten. Tokens und Profile bleiben erhalten. Für den Config-Import müssen `agent/config_bundle.py` und `backend/haproxy_config.py` neben den bisherigen Dateien vorhanden sein.
+
+Mehrere `-f`-Dateien und Verzeichnisse erkennt der Agent automatisch aus dem laufenden Dienst bzw. Docker-Containerbefehl. Für eigene Entrypoints oder relative Pfade `config_sources` mit sämtlichen Host-Pfaden in Ladereihenfolge im Profil setzen. Native Maps außerhalb der Konfigurationsverzeichnisse über `map_dirs` freigeben. Nach Profiländerungen den Agenten neu starten. Details, Einlesevorschau, Zusammenführung mehrerer Dateien und Wiederherstellung stehen in [IMPORT.md](IMPORT.md).

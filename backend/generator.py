@@ -4,6 +4,9 @@ def address(host, port):
     return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
 
 def generate(doc: Document, capabilities: dict) -> str:
+    if doc.imported_config is not None:
+        from backend.haproxy_config import generate_imported
+        return generate_imported(doc)
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):

@@ -52,3 +52,12 @@ def test_native_socket_paths_match_and_ipv6_url_is_bracketed():
     assert body.runtime_socket_config==body.runtime_socket
     assert body.cert_dir_config==body.cert_dir
     assert build_plan(body,'http://192.168.10.70:8100',ROOT)['instance']['agent_url']=='http://[fd00::71]:9101'
+
+
+def test_update_command_preserves_existing_profile_credentials():
+    from backend.agent_setup import build_update_command
+    root=Path(__file__).resolve().parent.parent
+    command=build_update_command('http://192.168.10.70:8100',root)['command']
+    assert 'HAPROXY_AGENT_UPDATE_ONLY=1' in command
+    assert 'HAPROXY_AGENT_SETUP_B64' not in command
+    assert 'sha256sum -c' in command

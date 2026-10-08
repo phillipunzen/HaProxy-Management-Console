@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import hmac
 import logging
 import secrets
@@ -23,9 +24,11 @@ from sqlalchemy.orm import Session
 
 from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,Metric,Audit
 from backend.settings import settings
-from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn
+from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn,ImportedMap
 from backend.generator import generate
-from backend.agent_setup import AgentSetupIn, build_plan
+from backend.agent_setup import AgentSetupIn, build_plan, build_update_command
+from backend.haproxy_config import import_config, enrich_stats, migration_context, MIGRATION_PREFIX
+from pydantic import BaseModel, Field
 
 ph=PasswordHasher()
 cipher=Fernet(settings.encryption_key.encode())
@@ -158,6 +161,11 @@ SETUP_ROOT = Path(__file__).resolve().parent.parent
 def agent_setup(body:AgentSetupIn,user=Depends(admin)):
     return build_plan(body, settings.app_origin, SETUP_ROOT)
 
+@app.post('/api/instances/{id}/agent-update')
+def agent_update(id:int,user=Depends(admin),db=Depends(get_db)):
+    instance(db,id)
+    return build_update_command(settings.app_origin,SETUP_ROOT)
+
 @app.get('/api/agent-installer')
 def agent_installer():
     # Public installation code; credentials exist only in the admin's setup plan.
@@ -167,6 +175,56 @@ def agent_installer():
 def agent_package():
     return FileResponse(SETUP_ROOT/'downloads/haproxy-management-docker.zip',
                         media_type='application/zip', filename='haproxy-management-docker.zip')
+
+@app.get('/api/import-guide')
+def import_guide(user=Depends(operator)):
+    return FileResponse(SETUP_ROOT/'docs/IMPORT.md',media_type='text/plain',filename='HAPROXY-IMPORT.md')
+
+class ImportRequest(BaseModel):
+    config: str | None = Field(default=None,min_length=1,max_length=1024*1024)
+    maps: list[ImportedMap] = Field(default_factory=list,max_length=100)
+    active_hash: str | None = Field(default=None,pattern=r'^[a-f0-9]{64}$')
+    document_version: int | None = None
+    preview_hash: str | None = Field(default=None,pattern=r'^[a-f0-9]{64}$')
+
+def import_preview_for(i,body):
+    try:bundle=agent(i,'/config-bundle')
+    except HTTPException as error:
+        if body.config is None:
+            raise HTTPException(422,'Datei-Import benötigt einen aktuellen Agenten. Unter Server den Agenten aktualisieren oder Konfiguration manuell laden.') from error
+        active=agent(i,'/config')
+        bundle={'config':active['config'],'hash':active['hash'],'sources':[],'maps':[],
+                'warnings':['Agent ohne Datei-Bündel: weitere geladene Dateien können nicht erkannt werden. Vor einer Migration Agent aktualisieren.']}
+    source=body.config if body.config is not None else bundle['config']
+    if bundle.get('complete') is False:
+        raise HTTPException(422,'Geladene Dateien konnten nicht vollständig ermittelt werden. config_sources im Agent-Profil mit allen -f-Dateien bzw. Verzeichnissen setzen, dann erneut einlesen.')
+    maps=[m.model_dump() for m in body.maps] if body.config is not None else [{'path':m['path'],'content':m['content']} for m in bundle['maps']]
+    try:preview=import_config(source,bundle['hash'],maps,
+        [{'path':s['path'],'hash':s['hash']} for s in bundle['sources']],
+        [{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']])
+    except ValueError as error:raise HTTPException(422,str(error))
+    preview['warnings']+=bundle['warnings'];preview['active_hash']=bundle['hash']
+    preview['source_files']=[s['path'] for s in bundle['sources']]
+    preview['preview_hash']=hashlib.sha256(json.dumps(preview['document'],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    return preview
+
+@app.post('/api/instances/{id}/import-preview')
+def preview_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(get_db)):
+    i=instance(db,id);preview=import_preview_for(i,body)
+    preview['document_version']=i.document_version
+    return preview
+
+@app.post('/api/instances/{id}/import')
+def commit_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(get_db)):
+    i=instance(db,id);preview=import_preview_for(i,body)
+    if body.active_hash!=preview['active_hash']:raise HTTPException(409,'Aktive Hauptdatei wurde geändert; Vorschau erneut laden.')
+    if body.preview_hash!=preview['preview_hash']:raise HTTPException(409,'Dateien, Maps oder Import-Inhalt wurden geändert; Vorschau erneut laden.')
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
+    if not i:raise HTTPException(404,'Instanz wurde entfernt.')
+    if i.document_version!=body.document_version:raise HTTPException(409,'Grafischer Entwurf wurde parallel geändert; Vorschau erneut laden.')
+    i.document=preview['document'];i.document_version+=1
+    audit(db,user.username,'configuration.imported',i.name);db.commit()
+    return i.document|{'version':i.document_version}
 
 @app.middleware('http')
 async def security_headers(request,call_next):
@@ -292,7 +350,15 @@ def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)
 def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);cap=agent(i)
     current=agent(i,'/config')
-    try: config=generate(Document.model_validate(i.document),cap)
+    try:
+        doc=Document.model_validate(i.document)
+        if doc.imported_config is not None:
+            if doc.imported_active_hash!=current['hash']:raise HTTPException(409,'Konfiguration seit dem Import geändert. Erneut importieren, damit externe Änderungen erhalten bleiben.')
+            if doc.imported_sources:
+                bundle=agent(i,'/config-bundle')
+                if {s.path:s.hash for s in doc.imported_sources}!={s['path']:s['hash'] for s in bundle['sources']} or {m.path:m.hash for m in doc.imported_map_hashes}!={m['host_path']:m['hash'] for m in bundle['maps']}:
+                    raise HTTPException(409,'Eine Konfigurations- oder Map-Datei wurde geändert. Erneut importieren.')
+        config=generate(doc,cap)
     except ValueError as e: raise HTTPException(422,str(e))
     return {'config':config,'base_hash':current['hash']}
 
@@ -326,14 +392,31 @@ def apply_revision(id:int,rev:int,user=Depends(operator),db=Depends(get_db)):
     # Persist the previous configuration before executing the remote mutation.
     previous=agent(i,'/config')
     if previous['hash']!=r.base_hash: raise HTTPException(409,'Aktive Konfiguration wurde geändert. Neu laden und abgleichen.')
-    snapshot=Revision(instance_id=id,config=previous['config'],base_hash=previous['hash'],status='snapshot',message='Sicherung vor Version '+str(rev),author=user.username)
+    try:context=migration_context(r.config)
+    except ValueError as error:raise HTTPException(422,str(error))
+    previous_config=previous['config']
+    if context:
+        bundle=agent(i,'/config-bundle');previous_config=bundle['config']
+    previous_config=''.join(line for line in previous_config.splitlines(keepends=True) if not line.startswith(MIGRATION_PREFIX))
+    snapshot=Revision(instance_id=id,config=previous_config,base_hash=previous['hash'],status='snapshot',message='Sicherung vor Version '+str(rev),author=user.username)
     db.add(snapshot);r.status='applying';audit(db,user.username,'revision.apply.requested',i.name,str(rev));db.commit()
     try: result=agent(i,'/apply','POST',{'config':r.config,'expected_hash':r.base_hash},timeout=65)
     except HTTPException as error:
         # A network timeout is ambiguous: preserve that distinction in the audit trail.
         r.status='uncertain' if error.status_code==502 and str(error.detail).startswith('Agent nicht erreichbar') else 'failed'
         audit(db,user.username,'revision.apply.'+r.status,i.name,str(error.detail));db.commit();raise
-    r.status='applied';r.applied_at=now();audit(db,user.username,'revision.applied',i.name,str(rev));db.commit()
+    r.status='applied';r.applied_at=now()
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
+    if not i:raise HTTPException(404,'Instanz wurde während des Anwendens entfernt.')
+    if i.document.get('imported_config') is not None:
+        try:matches=generate(Document.model_validate(i.document),{})==r.config
+        except ValueError:matches=False
+        if matches:
+            document=dict(i.document);document['imported_active_hash']=result['hash']
+            if result.get('sources') is not None:
+                document['imported_sources']=result['sources'];document['imported_map_hashes']=result['map_hashes']
+            i.document=document;i.document_version+=1
+    audit(db,user.username,'revision.applied',i.name,str(rev));db.commit()
     return result
 
 @app.post('/api/instances/{id}/service/{action}')
@@ -349,7 +432,14 @@ def service(id:int,action:str,user=Depends(operator),db=Depends(get_db)):
 
 @app.get('/api/instances/{id}/stats')
 def stats(id:int,user=Depends(current_user),db=Depends(get_db)):
-    i=instance(db,id);data=agent(i,'/stats');db.rollback()
+    i=instance(db,id);data=agent(i,'/stats')
+    try:
+        bundle=agent(i,'/config-bundle')
+        data=enrich_stats(data,bundle['config'],bundle['maps'])
+    except HTTPException:
+        try:data=enrich_stats(data,agent(i,'/config')['config'])
+        except HTTPException:data=enrich_stats(data)
+    db.rollback()
     if db.scalar(select(Instance.id).where(Instance.id==id).with_for_update()) is None: raise HTTPException(404,'Instanz wurde entfernt.')
     db.add(Metric(instance_id=id,data=data));db.commit();return data
 

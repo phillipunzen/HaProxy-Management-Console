@@ -5,34 +5,51 @@ if [[ ${EUID} -ne 0 ]]; then
   echo 'Bitte den Befehl mit sudo ausführen.' >&2
   exit 1
 fi
-: "${HAPROXY_AGENT_SETUP_B64:?Setup-Daten fehlen}"
+if [[ ${HAPROXY_AGENT_UPDATE_ONLY:-0} != 1 ]]; then
+  : "${HAPROXY_AGENT_SETUP_B64:?Setup-Daten fehlen}"
+fi
 : "${HAPROXY_SOURCE_URL:?Management-Adresse fehlt}"
 : "${HAPROXY_PACKAGE_SHA256:?Paket-Prüfsumme fehlt}"
 command -v apt-get >/dev/null || { echo 'Der Installer unterstützt Debian/Ubuntu mit systemd.' >&2; exit 1; }
 command -v systemctl >/dev/null || { echo 'systemd wird benötigt.' >&2; exit 1; }
+haproxy_install_dir=/opt/haproxy-control-agent
+if [[ ${HAPROXY_AGENT_UPDATE_ONLY:-0} == 1 ]]; then
+  haproxy_install_dir=$(systemctl show --property=WorkingDirectory --value haproxy-control-agent)
+  case "$haproxy_install_dir" in
+    /opt/haproxy-control-agent|/opt/haproxy-management) ;;
+    *) echo 'Vorhandener haproxy-control-agent.service fehlt oder nutzt ein anderes Arbeitsverzeichnis. Agent manuell nach Anleitung aktualisieren.' >&2; exit 1 ;;
+  esac
+  [[ -f /etc/haproxy-control/agent.json ]] || { echo 'Vorhandene Agent-Konfiguration fehlt.' >&2; exit 1; }
+fi
 haproxy_install_temp=$(mktemp -d)
 trap 'rm -rf "$haproxy_install_temp"' EXIT
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv curl certbot python3-certbot-dns-cloudflare
 curl -fsSL "${HAPROXY_SOURCE_URL%/}/api/agent-package" -o "$haproxy_install_temp/package.zip"
 printf '%s  %s\n' "$HAPROXY_PACKAGE_SHA256" "$haproxy_install_temp/package.zip" | sha256sum -c -
-install -d -m 755 /opt/haproxy-control-agent
-python3 - "$haproxy_install_temp/package.zip" <<'PY'
+install -d -m 755 "$haproxy_install_dir"
+python3 - "$haproxy_install_temp/package.zip" "$haproxy_install_dir" <<'PY'
 import sys
 from pathlib import Path
 from zipfile import ZipFile
-allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py',
-           'agent/__init__.py', 'agent/main.py', 'agent/config.example.json']
+allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/haproxy_config.py',
+           'agent/__init__.py', 'agent/main.py', 'agent/config_bundle.py', 'agent/config.example.json']
 with ZipFile(sys.argv[1]) as archive:
     for name in allowed:
-        target = Path('/opt/haproxy-control-agent') / name
+        target = Path(sys.argv[2]) / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(archive.read('haproxy-management/' + name))
         target.chmod(0o644)
 PY
-python3 -m venv /opt/haproxy-control-agent/.venv
-/opt/haproxy-control-agent/.venv/bin/pip install -r /opt/haproxy-control-agent/requirements.txt
-cd /opt/haproxy-control-agent
+python3 -m venv "$haproxy_install_dir/.venv"
+"$haproxy_install_dir/.venv/bin/pip" install -r "$haproxy_install_dir/requirements.txt"
+if [[ ${HAPROXY_AGENT_UPDATE_ONLY:-0} == 1 ]]; then
+  systemctl restart haproxy-control-agent
+  systemctl is-active haproxy-control-agent
+  echo 'Agent aktualisiert. Profile, Tokens und HAProxy-Konfigurationen wurden beibehalten. In der WebUI erneut einlesen.'
+  exit 0
+fi
+cd "$haproxy_install_dir"
 .venv/bin/python - <<'PY'
 import base64, json, os, re, shutil, socket, subprocess, tempfile, time
 from pathlib import Path

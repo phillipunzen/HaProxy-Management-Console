@@ -21,6 +21,8 @@ from cryptography.hazmat.primitives import serialization
 from fastapi import FastAPI, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
 from backend.schemas import CertificateIn
+from backend.haproxy_config import migration_context
+from agent.config_bundle import read_bundle
 
 CONFIG_PATH = Path(os.environ.get('AGENT_CONFIG', '/etc/haproxy-control/agent.json'))
 PROFILES = {}
@@ -131,16 +133,26 @@ def validate(p, config):
         # The HAProxy container runs unprivileged; a validation file contains only config.
         os.chmod(tmp,current.stat().st_mode & 0o777)
         os.chown(tmp,current.stat().st_uid,current.stat().st_gid)
+        try:context=migration_context(config)
+        except ValueError as error:raise HTTPException(422,str(error))
+        sources=read_bundle(p,run,sha)['sources'] if not context else []
+        if not sources:sources=[{'path':str(current),'container_path':p.get('container_config_dir','')+'/'+current.name}]
+        flags=[]
+        for source in sources:
+            value=tmp if source['path']==str(current) else source['path']
+            if p['kind']=='docker':
+                value=p['container_config_dir'].rstrip('/')+'/'+Path(tmp).name if source['path']==str(current) else source['container_path']
+            flags+=['-f',value]
         if p['kind']=='docker':
             container_path=p['container_config_dir'].rstrip('/')+'/'+Path(tmp).name
             running=run(['docker','inspect','--format','{{.State.Running}}',p['container']])=='true'
             if running:
-                args=['docker','exec',p['container'],'haproxy','-c','-f',container_path]
+                args=['docker','exec',p['container'],'haproxy','-c']+flags
             else:
                 image=run(['docker','inspect','--format','{{.Image}}',p['container']])
-                args=['docker','run','--rm','--network','none','--volumes-from',p['container']+':ro','--entrypoint','haproxy',image,'-c','-f',container_path]
+                args=['docker','run','--rm','--network','none','--volumes-from',p['container']+':ro','--entrypoint','haproxy',image,'-c']+flags
         else:
-            args=[p.get('haproxy_binary','/usr/sbin/haproxy'),'-c','-f',tmp]
+            args=[p.get('haproxy_binary','/usr/sbin/haproxy'),'-c']+flags
         return run(args)
     finally:
         Path(tmp).unlink(missing_ok=True)
@@ -301,11 +313,15 @@ def health(): return {'status':'ok'}
 def capabilities(profile: str,p=Depends(auth)):
     return {k:v for k,v in p.items() if k in ('kind','runtime_socket_config','cert_dir_config','container','service')} | {
         'dns_providers':list(p.get('dns_providers',{})), 'http_challenge':bool(p.get('acme_webroot')),
-        'automatic_renewal':True}
+        'automatic_renewal':True,'config_bundle':True}
+
+@app.get('/profiles/{profile}/config-bundle')
+def config_bundle(profile: str,p=Depends(auth)):
+    with lock(p):return read_bundle(p,run,sha)
 
 @app.get('/profiles/{profile}/config')
 def read_config(profile: str,p=Depends(auth)):
-    config=Path(p['config_path']).read_text()
+    config=Path(p['config_path']).read_bytes().decode()
     return {'config':config,'hash':sha(config)}
 
 @app.post('/profiles/{profile}/validate')
@@ -314,8 +330,11 @@ def check(profile: str,body: ConfigIn,p=Depends(auth)):
 
 @app.post('/profiles/{profile}/apply')
 def apply(profile: str,body: ConfigIn,p=Depends(auth)):
+    try:context=migration_context(body.config)
+    except ValueError as error:raise HTTPException(422,str(error))
+    if context:return apply_migration(p,body,context)
     with lock(p):
-        target=Path(p['config_path']);old=target.read_text();st=target.stat()
+        target=Path(p['config_path']);old=target.read_bytes().decode();st=target.stat()
         if sha(old)!=body.expected_hash: raise HTTPException(409,'Konfiguration wurde extern geändert. Neu laden und Änderungen abgleichen.')
         output=validate(p,body.config)
         # Read the runtime socket before overwriting the active configuration.
@@ -331,6 +350,47 @@ def apply(profile: str,body: ConfigIn,p=Depends(auth)):
             except Exception: raise HTTPException(502,'Reload und Wiederherstellung des Dienstes fehlgeschlagen. Alte Datei wiederhergestellt; Server prüfen.')
             raise HTTPException(502,'Reload fehlgeschlagen; vorherige Konfiguration und Dienst wiederhergestellt.') from error
         return {'applied':True,'hash':sha(body.config),'output':output,'pid':current['Pid']}
+
+def apply_migration(p,body,context):
+    with lock(p):
+        bundle=read_bundle(p,run,sha)
+        actual_files={item['path']:item['hash'] for item in bundle['sources']}
+        expected_files={item['path']:item['hash'] for item in context['files']}
+        if actual_files!=expected_files or bundle['hash']!=body.expected_hash:
+            raise HTTPException(409,'Eine Konfigurationsdatei wurde geändert. Erneut importieren und vergleichen.')
+        actual_maps={item['host_path']:item['hash'] for item in bundle['maps']}
+        if actual_maps!={item['path']:item['hash'] for item in context['maps']}:
+            raise HTTPException(409,'Eine Map-Datei wurde geändert. Erneut importieren und vergleichen.')
+        output=validate(p,body.config)
+        try:info(p)
+        except OSError:raise HTTPException(502,'Runtime-Socket nicht erreichbar; keine Migration vorgenommen.')
+        backup=STATE_DIR/'backups'/sha(p['config_path'])/str(time.time_ns())
+        atomic(backup/'bundle.json',json.dumps(bundle).encode(),0o600)
+        old=[]
+        for source in bundle['sources']:
+            path=Path(source['path']);attributes=path.stat()
+            old.append((path,source['content'],attributes))
+        def write(path,content,attributes):atomic(path,content.encode(),attributes.st_mode & 0o777,attributes.st_uid,attributes.st_gid)
+        try:
+            for path,content,attributes in old:
+                value=body.config if str(path)==p['config_path'] else '# Consolidated into '+p['config_path']+' by HAProxy Control\n'
+                write(path,value,attributes)
+            current=reload_service(p)
+        except Exception as error:
+            restore_errors=[]
+            for path,content,attributes in old:
+                try:write(path,content,attributes)
+                except OSError:restore_errors.append(str(path))
+            if restore_errors:
+                logger.error('Migration file restore failed: %s',restore_errors)
+                raise HTTPException(502,'Wiederherstellung einzelner Dateien fehlgeschlagen; Agent-Sicherung und HAProxy-Dienst prüfen.') from error
+            try:reload_service(p)
+            except Exception:raise HTTPException(502,'Originaldateien wiederhergestellt; HAProxy-Dienst prüfen.') from error
+            raise HTTPException(502,'Migration fehlgeschlagen; alle Originaldateien und Dienst wiederhergestellt.') from error
+        after=read_bundle(p,run,sha)
+        return {'applied':True,'hash':sha(body.config),'output':output,'pid':current['Pid'],
+                'sources':[{'path':s['path'],'hash':s['hash']} for s in after['sources']],
+                'map_hashes':[{'path':m['host_path'],'hash':m['hash']} for m in after['maps']]}
 
 @app.post('/profiles/{profile}/service/{action}')
 def service(profile: str,action: str,p=Depends(auth)):
