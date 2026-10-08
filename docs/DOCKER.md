@@ -111,3 +111,7 @@ Nach dem Verbinden des Hosts unter **Proxy Hosts → Vorhandene Config einlesen*
 ## Metrikspeicher bei Updates
 
 Neue Messungen speichern nur kompakte globale Werte. Die alte Tabelle `metrics` wird automatisch in Zeitintervalle übernommen; unter **Einstellungen → Metrikspeicher** lässt sich der Fortschritt prüfen und danach freier Platz zurückgeben. Die [Metrik-Anleitung](METRICS.md) beschreibt die Aufbewahrung, Durchschnitt/Spitzenwerte, Ausfälle und MariaDB-Optimierung.
+
+## Live-Topologie
+
+Unter **Topologie** stehen Sites, TCP-Dienste, Backend-Pools und Zielserver als interaktives Diagramm bereit. Animierte Verbindungen zeigen gemessene Aktivität bzw. aktive Sessions, mit Suche, Filtern und Details. Die Ansicht speichert keine zusätzlichen Metriken. Messgrenzen und Bedienung: [TOPOLOGY.md](TOPOLOGY.md).

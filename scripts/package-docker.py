@@ -13,6 +13,7 @@ files = {
     'docs/AGENT.md': root / 'docs' / 'AGENT.md',
     'docs/IMPORT.md': root / 'docs' / 'IMPORT.md',
     'docs/METRICS.md': root / 'docs' / 'METRICS.md',
+    'docs/TOPOLOGY.md': root / 'docs' / 'TOPOLOGY.md',
     'requirements.txt': root / 'requirements.txt',
     'backend/__init__.py': root / 'backend' / '__init__.py',
     'backend/schemas.py': root / 'backend' / 'schemas.py',

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,Revision,MetricLatest,Audit
 from backend import metrics as metric_store
+from backend import topology as topology_store
 from backend.settings import settings
 from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn,ImportedMap
 from backend.generator import generate
@@ -39,6 +40,8 @@ logger=logging.getLogger('haproxy-control')
 failures=defaultdict(deque)
 rate_lock=threading.Lock()
 dummy_hash=ph.hash(secrets.token_urlsafe(32))
+topology_cache={}
+topology_cache_lock=threading.Lock()
 
 
 def audit(db,actor,action,target='',detail=''):
@@ -436,6 +439,33 @@ def stats(id:int,user=Depends(current_user),db=Depends(get_db)):
         except HTTPException:data=enrich_stats(data)
     # Live detail responses never create history rows; only the collector writes.
     return data|{'history_policy':{'raw_hours':settings.metrics_raw_hours,'fine_days':settings.metrics_fine_days,'total_days':settings.metrics_retention_days}}
+
+@app.get('/api/instances/{id}/topology')
+def topology(id:int,user=Depends(current_user),db=Depends(get_db)):
+    i=instance(db,id);data=agent(i,'/stats')
+    captured_at=now().isoformat()+'Z'
+    # Only routing inputs are cached, bounded in memory. No runtime or graph rows
+    # enter MariaDB. Identity changes invalidate an existing instance's cache.
+    identity=(i.agent_url,i.profile,i.token_cipher)
+    with topology_cache_lock:cached=topology_cache.get(id)
+    config=None;maps=[];warning=None
+    if cached and cached[0]==identity and time.monotonic()-cached[1]<30:
+        config,maps=cached[2:]
+    else:
+        try:
+            bundle=agent(i,'/config-bundle');config=bundle['config'];maps=bundle.get('maps',[])
+        except HTTPException:
+            try:config=agent(i,'/config')['config']
+            except HTTPException:warning='Aktive Konfiguration konnte nicht gelesen werden.'
+        if config is not None:
+            with topology_cache_lock:
+                topology_cache.pop(id,None)
+                if len(topology_cache)>=128:topology_cache.pop(next(iter(topology_cache)))
+                topology_cache[id]=(identity,time.monotonic(),config,maps)
+    graph=topology_store.build(config,maps,data)
+    graph['captured_at']=captured_at
+    if warning:graph['warnings'].append(warning)
+    return graph
 
 @app.get('/api/instances/{id}/metrics')
 def metrics(id:int,hours:int=1,user=Depends(current_user),db=Depends(get_db)):
