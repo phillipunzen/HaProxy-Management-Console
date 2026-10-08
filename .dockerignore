@@ -11,6 +11,8 @@ frontend/dist
 agent/config.json
 agent/state
 lab
+dist
+downloads
 tests
 *.pem
 *.key

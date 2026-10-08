@@ -11,6 +11,7 @@ frontend/tsconfig.tsbuildinfo
 agent/config.json
 agent/state/
 lab/
+dist/
 *.pem
 *.key
 *.ini

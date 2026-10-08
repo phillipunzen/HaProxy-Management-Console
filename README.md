@@ -6,6 +6,8 @@ Deutsche Management-Oberfläche für mehrere HAProxy-Server mit nativer Installa
 
 Image: `ghcr.io/phillipunzen/haproxy-management-console:latest` (Linux/amd64).
 
+Eine fertige `docker-compose.yml` mit expliziten ENV-Variablen liegt im Repository. Das [Docker-Paket als ZIP herunterladen](https://github.com/phillipunzen/HaProxy-Management-Console/raw/refs/heads/main/downloads/haproxy-management-docker.zip): enthalten sind Compose-Datei, `.env.example` und Startanleitung. Die [Docker-Anleitung](docs/DOCKER.md) beschreibt jede Variable und die Erzeugung der Schlüssel. Das ZIP wird mit `python3 scripts/package-docker.py` unter `downloads/haproxy-management-docker.zip` neu erstellt. Im vollständigen [Repository-Archiv](https://github.com/phillipunzen/HaProxy-Management-Console/archive/refs/heads/main.zip) sind diese Dateien ebenfalls enthalten. Für die fertige Compose-Datei immer `docker compose -f docker-compose.yml …` verwenden; `compose.yaml` ist für den lokalen Build vorgesehen.
+
 ```bash
 git clone https://github.com/phillipunzen/HaProxy-Management-Console.git
 cd HaProxy-Management-Console
