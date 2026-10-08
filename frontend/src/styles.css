@@ -414,3 +414,27 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+.wizard-steps { list-style: none; padding: 0; display: flex; gap: 14px; margin: 0 0 25px; }
+.wizard-steps li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
+.wizard-steps li > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #f1f5f9; flex-shrink: 0; }
+.wizard-steps li.active { color: #2563eb; font-weight: 600; }
+.wizard-steps li.active > span, .wizard-steps li.done > span { color: white; background: #2563eb; }
+.wizard-intro { color: #64748b; font-size: 13px; line-height: 1.7; margin: 10px 0 20px; }
+.wizard-kind { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
+.wizard-kind button { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; color: #64748b; text-align: left; cursor: pointer; }
+.wizard-kind button strong { color: #334155; font-size: 14px; }
+.wizard-kind button span { font-size: 12px; line-height: 1.5; }
+.wizard-kind button.selected { border-color: #2563eb; background: #eff6ff; color: #2563eb; }
+.wizard-command, .wizard-mounts { width: 100%; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.6; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; overflow: auto; margin: 10px 0 15px; }
+.wizard-command { resize: vertical; min-height: 120px; overflow-wrap: anywhere; }
+.wizard-summary { margin: 20px 0; }
+.wizard-summary > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+.wizard-summary dt { color: #64748b; }
+.wizard-summary dd { margin: 0; overflow-wrap: anywhere; }
+.setup-wizard .notice { margin-top: 15px; }
+@media (max-width: 600px) {
+  .wizard-steps { gap: 8px; }
+  .wizard-steps li { font-size: 10px; gap: 5px; }
+  .wizard-kind { grid-template-columns: 1fr; }
+  .wizard-summary > div { flex-direction: column; gap: 4px; }
+}

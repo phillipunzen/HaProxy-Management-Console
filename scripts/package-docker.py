@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a minimal Docker deployment ZIP without local credentials."""
+"""Package Docker deployment and agent installation files without credentials."""
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -10,7 +10,14 @@ files = {
     'docker-compose.yml': root / 'docker-compose.yml',
     '.env.example': root / '.env.example',
     'README.md': root / 'docs' / 'DOCKER.md',
+    'docs/AGENT.md': root / 'docs' / 'AGENT.md',
+    'requirements.txt': root / 'requirements.txt',
+    'backend/__init__.py': root / 'backend' / '__init__.py',
+    'backend/schemas.py': root / 'backend' / 'schemas.py',
 }
+for name in ('__init__.py', 'main.py', 'config.example.json',
+             'haproxy-control-agent.service', 'haproxy-control-webroot.service'):
+    files[f'agent/{name}'] = root / 'agent' / name
 with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
     for name, source in files.items():
         archive.write(source, f'haproxy-management/{name}')

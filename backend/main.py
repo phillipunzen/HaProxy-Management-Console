@@ -25,11 +25,12 @@ from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Ins
 from backend.settings import settings
 from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,Document,DraftIn,CertificateIn
 from backend.generator import generate
+from backend.agent_setup import AgentSetupIn, build_plan
 
 ph=PasswordHasher()
 cipher=Fernet(settings.encryption_key.encode())
-if len(settings.session_secret)<32 or len(settings.admin_password)<14:
-    raise RuntimeError('Session secret or bootstrap password is too short')
+if len(settings.session_secret)<32:
+    raise RuntimeError('Session secret must contain at least 32 characters')
 logger=logging.getLogger('haproxy-control')
 failures=defaultdict(deque)
 rate_lock=threading.Lock()
@@ -150,6 +151,22 @@ async def lifespan(app):
     task.cancel()
 
 app=FastAPI(title='HAProxy Control',version='0.1.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+
+SETUP_ROOT = Path(__file__).resolve().parent.parent
+
+@app.post('/api/agent-setup')
+def agent_setup(body:AgentSetupIn,user=Depends(admin)):
+    return build_plan(body, settings.app_origin, SETUP_ROOT)
+
+@app.get('/api/agent-installer')
+def agent_installer():
+    # Public installation code; credentials exist only in the admin's setup plan.
+    return FileResponse(SETUP_ROOT/'scripts/install-agent.sh', media_type='text/plain')
+
+@app.get('/api/agent-package')
+def agent_package():
+    return FileResponse(SETUP_ROOT/'downloads/haproxy-management-docker.zip',
+                        media_type='application/zip', filename='haproxy-management-docker.zip')
 
 @app.middleware('http')
 async def security_headers(request,call_next):

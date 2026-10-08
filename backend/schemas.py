@@ -18,11 +18,11 @@ class LoginIn(BaseModel):
 
 class PasswordIn(BaseModel):
     current_password: str = Field(max_length=200)
-    password: str = Field(min_length=14, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
 
 class UserIn(BaseModel):
     username: str = Field(pattern=r'^[a-zA-Z0-9_.-]{3,80}$')
-    password: str = Field(min_length=14, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
     role: Literal['admin', 'operator', 'viewer']
 
 class InstanceIn(BaseModel):

@@ -1,6 +1,6 @@
 # Docker-Installation
 
-Dieses Paket enthält `docker-compose.yml`, `.env.example` und diese Anleitung. Das Image enthält die fertige Webanwendung für Linux/amd64. Eine externe MariaDB und Docker mit Compose werden benötigt. Die Datenbank und der Datenbankbenutzer müssen vor dem ersten Start existieren; die Anwendung erstellt ihre Tabellen selbst.
+Dieses Paket enthält `docker-compose.yml`, `.env.example`, diese Anleitung sowie die Agent-Dateien und `docs/AGENT.md` zum Verbinden nativer und Docker-basierter HAProxy-Server. Das Image enthält die fertige Webanwendung für Linux/amd64. Eine externe MariaDB und Docker mit Compose werden benötigt. Die Datenbank und der Datenbankbenutzer müssen vor dem ersten Start existieren; die Anwendung erstellt ihre Tabellen selbst.
 
 ## Start
 
@@ -22,7 +22,7 @@ docker run --rm --network none --entrypoint python \
   -c 'import secrets; from cryptography.fernet import Fernet; print("ENCRYPTION_KEY=" + Fernet.generate_key().decode()); print("SESSION_SECRET=" + secrets.token_urlsafe(48)); print("ADMIN_PASSWORD=" + secrets.token_urlsafe(24))'
 ```
 
-Die drei ausgegebenen Zeilen **anstelle der vorhandenen Platzhalter** in `.env` übernehmen. Der Befehl zeigt neue Werte an und ändert keine Dateien. `ENCRYPTION_KEY` ist ein gültiger Fernet-Schlüssel, `SESSION_SECRET` hat mindestens 32 Zeichen und `ADMIN_PASSWORD` mindestens 14 Zeichen. `.env` geschützt sichern; bei Updates oder Wiederverwendung der Datenbank die vorhandenen Schlüssel behalten. Ohne den ursprünglichen `ENCRYPTION_KEY` lassen sich gespeicherte Agent-Tokens nicht mehr entschlüsseln.
+Die drei ausgegebenen Zeilen **anstelle der vorhandenen Platzhalter** in `.env` übernehmen. Der Befehl zeigt neue Werte an und ändert keine Dateien. `ENCRYPTION_KEY` ist ein gültiger Fernet-Schlüssel, `SESSION_SECRET` hat mindestens 32 Zeichen und `ADMIN_PASSWORD` mindestens 10 Zeichen. `.env` geschützt sichern; bei Updates oder Wiederverwendung der Datenbank die vorhandenen Schlüssel behalten. Ohne den ursprünglichen `ENCRYPTION_KEY` lassen sich gespeicherte Agent-Tokens nicht mehr entschlüsseln.
 
 MariaDB-Zugangsdaten eintragen und `APP_ORIGIN` auf die tatsächliche Browser-Adresse setzen, z. B. `http://192.168.10.70:8100`.
 
@@ -56,14 +56,32 @@ Die Oberfläche unter `APP_ORIGIN` öffnen und mit `ADMIN_USERNAME` / `ADMIN_PAS
 | `ENCRYPTION_KEY` | Fernet-Schlüssel aus dem obigen Befehl für gespeicherte Agent-Tokens. Dauerhaft behalten und geschützt sichern. |
 | `SESSION_SECRET` | Mindestens 32 zufällige Zeichen für Sitzungsschutz; dauerhaft behalten. |
 | `ADMIN_USERNAME` | Name des ersten Administrators, standardmäßig `admin`. |
-| `ADMIN_PASSWORD` | Zufälliges Startpasswort mit mindestens 14 Zeichen. |
+| `ADMIN_PASSWORD` | Zufälliges Startpasswort mit mindestens 10 Zeichen. |
 | `COOKIE_SECURE` | `false` für HTTP im privaten LAN; `true` beim Zugriff über HTTPS. |
 | `METRICS_INTERVAL` | Statistik-Abfrageintervall in Sekunden, standardmäßig `30`; mindestens `10` wird verwendet. |
 | `AGENT_CA_FILE` | Optionaler Pfad zu einem CA-Bundle **im Container** für Agenten mit interner CA; sonst leer lassen. |
 
 Für eine interne CA `agent-ca-bundle.pem` mit System-CAs und der internen CA neben die Compose-Datei legen, den kommentierten `volumes`-Abschnitt aktivieren und `AGENT_CA_FILE=/certs/agent-ca-bundle.pem` setzen.
 
-Cloudflare-Tokens werden auf dem jeweiligen HAProxy-Agenten konfiguriert. Die Agent-Einrichtung für native HAProxy-Dienste und Docker ist im [Repository](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/AGENT.md) beschrieben.
+## HAProxy-Server verbinden: Nativ oder Docker
+
+In der WebUI **Server → Server verbinden** öffnen. Der Assistent fragt nach Installationstyp, privater Host-IP, Dienst- bzw. Containername und den Pfaden. Er erzeugt einen zugeschnittenen Einzeiler mit einem neuen Agent-Token. Den Befehl per SSH auf dem HAProxy-Host ausführen, den Agent-Port für den Management-Host freigeben und im selben Dialog **Verbindung prüfen & speichern** wählen. Der Installer unterstützt Debian/Ubuntu mit systemd und eine bereits laufende HAProxy-Instanz. Bei Docker müssen die im Dialog angezeigten Verzeichnis-Mounts vorhanden sein; fehlende Mounts werden als Fehler mit Hinweis gemeldet. Bereits installierte Agenten über **Agent bereits installiert** verbinden.
+
+Auf dem jeweiligen **HAProxy-Host** den mitgelieferten Agenten installieren – auch wenn HAProxy in Docker läuft. Der Agent verwaltet den lokalen systemd-Dienst bzw. die lokalen Container. Seine Konfiguration liegt unter `/etc/haproxy-control/agent.json` und enthält pro Instanz einen Profilnamen und einen eigenen Token. Er benötigt keine Datenbankverbindung.
+
+Die [Schritt-für-Schritt-Anleitung im Paket](docs/AGENT.md) zeigt alle Befehle für die Installation, native Runtime-Sockets, Docker-Mounts und die Netzwerkadresse des Agenten. Die Beispiele verwenden `native` für den systemd-Dienst und `docker-edge` für einen Container.
+
+Anschließend in der WebUI **Server → Server verbinden**:
+
+| Feld | Eintrag |
+| --- | --- |
+| Servername | Frei wählbar, z. B. `Edge Proxy`. |
+| Agent-Adresse | URL des Agenten, z. B. `http://192.168.10.71:9101`; ohne Profilpfad. |
+| Profilname | `native` oder `docker-edge`, genau wie in `agent.json`. |
+| Agent-Token | Der Wert `token` des gewählten Profils. |
+| HTTP-Verbindung im privaten Netz zulassen | Für das HTTP-Beispiel aktivieren; bei HTTPS deaktiviert lassen. |
+
+**Verbindung prüfen & speichern** wählen. Der Installationstyp wird automatisch erkannt. Cloudflare-Tokens werden auf dem jeweiligen HAProxy-Agenten konfiguriert; auch das ist in der Agent-Anleitung beschrieben.
 
 ## Betrieb und Updates
 

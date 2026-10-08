@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -10,7 +11,7 @@ class Settings(BaseSettings):
     encryption_key: str
     session_secret: str
     admin_username: str = 'admin'
-    admin_password: str
+    admin_password: str = Field(min_length=10, max_length=200)
     cookie_secure: bool = True
     app_origin: str = 'https://localhost'
     metrics_interval: int = 30

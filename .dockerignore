@@ -12,7 +12,8 @@ agent/config.json
 agent/state
 lab
 dist
-downloads
+downloads/*
+!downloads/haproxy-management-docker.zip
 tests
 *.pem
 *.key
