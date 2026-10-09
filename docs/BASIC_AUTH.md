@@ -38,6 +38,8 @@ Vorhandene `userlist`-Abschnitte und eigene Authentifizierungsregeln bleiben bei
 3. **Vorhandene Backend-Anmeldung für diese Domain ersetzen** bestätigen und den Entwurf speichern.
 4. **Konfiguration erzeugen → Prüfen & anwenden** ausführen.
 
+Nach gespeicherter Umstellung blendet der Domain-Dialog den Hinweis auf die alte Backend-Anmeldung aus. Die bestätigte Zuordnung bleibt erhalten. Beim Ändern von Domain, Frontend oder Backend ist für den neuen Bezug wieder eine Bestätigung nötig.
+
 Die zentrale Gruppe ersetzt die bisherigen Backend-Anmelderegeln ausschließlich für diese Domain am gewählten Frontend. Andere Domains und Frontends am selben Backend behalten die ursprünglichen Regeln, einschließlich ihrer Bedingungen und Reihenfolge. Bestehende Benutzer werden nicht automatisch in die zentrale Gruppe übernommen. Ohne Bestätigung bleibt die Erzeugung bei einem Konflikt gesperrt; die Meldung unter **Frontends & Backends** führt zu den Domain-Zuordnungen.
 
 Die ursprünglichen Regeln bleiben reversibel in markierten Blöcken erhalten. Nach erneutem Einlesen bleibt auch die bestätigte Umstellung erhalten. Entfernst du später die zentrale Gruppe, werden die ursprünglichen Backend-Anmelderegeln für diese Domain wieder wirksam; „keine zentrale Gruppe“ bedeutet bei solchen Imports daher nicht automatisch öffentlichen Zugang.
