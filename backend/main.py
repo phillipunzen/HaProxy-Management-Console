@@ -129,6 +129,12 @@ def agent(i,path='',method='GET',body=None,timeout=10):
         raise HTTPException(502,'Agent nicht erreichbar. Adresse, TLS-Zertifikat und Firewall prüfen.')
 
 
+def validate_document(db,doc):
+    from backend.access_control import validate_document as validate_access
+    validate_access(doc)
+    basic_auth.validate_document(db,doc)
+
+
 collection_lock=threading.Lock()
 
 def collect_metrics():
@@ -270,7 +276,7 @@ def commit_import(id:int,body:ImportRequest,user=Depends(operator),db=Depends(ge
     if body.active_hash!=preview['active_hash']:raise HTTPException(409,'Aktive Hauptdatei wurde geändert; Vorschau erneut laden.')
     if body.preview_hash!=preview['preview_hash']:raise HTTPException(409,'Dateien, Maps oder Import-Inhalt wurden geändert; Vorschau erneut laden.')
     basic_auth.lock_directory(db)
-    try:basic_auth.validate_document(db,Document.model_validate(preview['document']))
+    try:validate_document(db,Document.model_validate(preview['document']))
     except ValueError as error:raise HTTPException(422,str(error))
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i:raise HTTPException(404,'Instanz wurde entfernt.')
@@ -501,7 +507,7 @@ def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
 def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)):
     basic_auth.lock_directory(db)
     try:
-        basic_auth.validate_document(db,body)
+        validate_document(db,body)
         existing=basic_auth.existing_rules(body.imported_config)
     except ValueError as error:raise HTTPException(422,str(error))
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
@@ -532,7 +538,7 @@ def delete_backend(id:int,body:BackendDeleteIn,user=Depends(operator),db=Depends
     if body.version!=i.document_version:raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
     try:
         doc,_=plan(Document.model_validate(i.document),body.name)
-        basic_auth.validate_document(db,doc)
+        validate_document(db,doc)
     except ValueError as error:raise HTTPException(422,str(error))
     i.document=doc.model_dump(exclude={'version'});i.document_version+=1
     audit(db,user.username,'backend.deleted',i.name,body.name);db.commit()
@@ -646,7 +652,7 @@ def apply_revision(id:int,rev:int,body:ApplyRevisionIn=ApplyRevisionIn(),user=De
                     [{'path':m['path'],'content':m['content']} for m in bundle['maps']],
                     [{'path':s['path'],'hash':s['hash']} for s in bundle['sources']],
                     [{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']])
-                basic_auth.validate_document(db,Document.model_validate(preview['document']))
+                validate_document(db,Document.model_validate(preview['document']))
                 i.document=preview['document'];i.document_version+=1
             except ValueError as error:sync_error='Grafischer Abgleich fehlgeschlagen: '+str(error)
     deployment=db.get(BasicAuthDeployment,id)

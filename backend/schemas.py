@@ -141,7 +141,39 @@ class BackendServer(BaseModel):
                 raise ValueError('Ungültige IP-Adresse oder Hostname.')
         return v
 
+class AccessPolicy(BaseModel):
+    networks: list[str] = Field(min_length=1,max_length=100)
+    paths: list[str] = Field(default_factory=list,max_length=20)
+
+    @field_validator('networks')
+    @classmethod
+    def networks_ok(cls,values):
+        result=[]
+        for value in values:
+            for token in re.split(r'[\s,]+',value.strip()):
+                if not token:continue
+                if '%' in token:raise ValueError('IP-Adressen oder CIDR-Netze ohne Zonen-ID verwenden.')
+                try:
+                    item=str(ipaddress.ip_network(token,strict=False)) if '/' in token else str(ipaddress.ip_address(token))
+                except ValueError:raise ValueError('Ungültige IP-Adresse oder CIDR-Netz: '+token)
+                if item not in result:result.append(item)
+        if not result or len(result)>100:raise ValueError('Mindestens eine und höchstens 100 erlaubte IP-Adressen oder Netze angeben.')
+        return result
+
+    @field_validator('paths')
+    @classmethod
+    def paths_ok(cls,values):
+        result=[]
+        for value in values:
+            value=value.strip()
+            if not value:continue
+            if len(value)>300 or not re.fullmatch(r'/[a-zA-Z0-9/._~!$&()*+,=:@%+-]*',value):
+                raise ValueError('Pfad-Präfix muss mit / beginnen; Sonderzeichen URL-kodieren, keine Query-Parameter.')
+            if value not in result:result.append(value)
+        return result
+
 class Host(BaseModel):
+    access_policy: AccessPolicy | None = None
     proxy_options: list[str] = Field(default_factory=list,max_length=100)
 
     @field_validator("proxy_options")
@@ -246,6 +278,7 @@ class ImportedBackend(BaseModel):
     servers: list[ImportedServer] = Field(max_length=500)
 
 class ImportedRoute(BaseModel):
+    access_policy: AccessPolicy | None = None
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     frontend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     domain: str = Field(max_length=253)
@@ -397,6 +430,8 @@ class Document(BaseModel):
             raise ValueError('HTTPS-Weiterleitungen benötigen einen aktiven HTTPS-Listener.')
         if any(b.mode!="http" and b.proxy_options for b in self.backends):raise ValueError("Proxy-Optionen benötigen einen HTTP-Backend-Pool.")
         if sum(len(line) for b in self.hosts+self.imported_managed_hosts+self.backends+self.imported_backends for line in b.proxy_options or [])>512000:raise ValueError("Proxy-Optionen zusammen höchstens 512000 Zeichen pro Server.")
+        if sum(len(h.access_policy.networks)*len(h.hostnames) for h in self.hosts+self.imported_routes if h.access_policy)>20000:
+            raise ValueError('IP-Zugriffslisten zusammen höchstens 20000 Adresszuordnungen pro Server.')
         for items in (self.frontends,self.backends):
             if len({v.name for v in items})!=len(items):raise ValueError('Frontend- und Backend-Namen müssen eindeutig sein.')
         names=[f.name for f in self.frontends]+[b.name for b in self.backends]+['backend_'+h.id for h in self.hosts]

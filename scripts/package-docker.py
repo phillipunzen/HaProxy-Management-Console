@@ -21,6 +21,7 @@ files = {
     'docs/SERVERS.md': root / 'docs' / 'SERVERS.md',
     'requirements.txt': root / 'requirements.txt',
     'backend/__init__.py': root / 'backend' / '__init__.py',
+    'backend/access_control.py': root / 'backend' / 'access_control.py',
     'backend/backend_delete.py': root / 'backend' / 'backend_delete.py',
     'backend/proxy_options.py': root / 'backend' / 'proxy_options.py',
     'backend/schemas.py': root / 'backend' / 'schemas.py',

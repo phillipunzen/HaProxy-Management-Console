@@ -27,7 +27,7 @@ def validate(values):
         except ValueError as error:raise ValueError('Ungültige Anführungszeichen in einer Proxy-Option.') from error
         if tokens==['mode','http']:continue # Mode is already managed by the HTTP pool.
         if not editable(tokens):raise ValueError('Proxy-Option nicht unterstützt: HTTP-Pfad-/Header-Regeln, option, no option oder Backend-Timeouts verwenden. Listener, Server, Authentifizierung und Routing separat bearbeiten.')
-        if 'txn.mgmt_' in line or 'mgmt_basic_' in line:
+        if 'txn.mgmt_' in line or 'mgmt_basic_' in line or 'mgmt_access_' in line:
             raise ValueError('Interne Management-Namen sind in Proxy-Optionen reserviert.')
         result.append(line)
     if len(result)>100 or sum(map(len,result))>40000:raise ValueError('Maximal 100 Proxy-Optionen mit zusammen 40000 Zeichen.')

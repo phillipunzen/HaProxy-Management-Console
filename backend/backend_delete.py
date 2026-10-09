@@ -35,6 +35,8 @@ def dependencies(config,names,maps=()):
 def remove_sections(config,names):
     if not names:return config
     from backend import tls_bindings
+    from backend.access_control import strip_managed
+    config=strip_managed(config)
     # Routing maps have already been expanded by generate_imported.
     dependencies(config,names)
     lines,sections=parse_sections(config);removed=set();fronts=set()

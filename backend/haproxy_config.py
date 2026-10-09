@@ -36,14 +36,16 @@ def map_routes(config,maps):
         if preferences is None:
             from backend.basic_auth import read_metadata
             from backend.tls_bindings import read
+            from backend.access_control import read as access_metadata,digest
             auth=read_metadata(config) or {};preferences={}
             for site in auth.get('sites',[]):
                 if site['kind']=='route':preferences[(site['frontend'],site['backend'],site['domain'])]=(site['group'],site['forward'],site.get('replace_existing',False))
             tls={(p['frontend'],s['domain']):s['certificate'] for p in read(config) for s in p['sites']}
-            preferences=(preferences,tls)
-        auth,tls=preferences;groups={}
+            access={(s['frontend'],s['backend'],s['domain']):digest(s['policy']) for s in (access_metadata(config) or {}).get('sites',[]) if s['kind']=='route'}
+            preferences=(preferences,tls,access)
+        auth,tls,access=preferences;groups={}
         for name in names:
-            key=(auth.get((frontend,backend,name)),tls.get((frontend,name)))
+            key=(auth.get((frontend,backend,name)),tls.get((frontend,name)),access.get((frontend,backend,name)))
             groups.setdefault(key,[]).append(name)
         # Differently protected/certified names stay separate on reimport.
         return [values[offset:offset+30] for values in groups.values() for offset in range(0,len(values),30)]
@@ -254,6 +256,8 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
     from backend.schemas import Document
     from backend.basic_auth import restore_routes
     from backend.tls_bindings import restore_document
+    from backend.access_control import restore_document as restore_access,strip_managed as check_access
+    check_access(config)  # Refuse manually altered managed restrictions.
     recalled,recall_warnings=recalled_document(config,active_hash,maps,sources,map_hashes)
     proxies=inventory(config)
     if recalled is not None:
@@ -276,9 +280,9 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
         if route.backend not in known:warnings.append(f'{route.domain}: Backend {route.backend} fehlt in den eingelesenen Dateien.')
     for rule in rules:
         if rule['default'] and rule['default'] not in known:warnings.append(f'{rule["frontend"]}: Fallback {rule["default"]} fehlt in den eingelesenen Dateien.')
-    return {'document':restore_document(restore_routes(Document(imported_config=config,imported_active_hash=active_hash,hosts=hosts,imported_managed_hosts=hosts,imported_backends=backends,
+    return {'document':restore_access(restore_document(restore_routes(Document(imported_config=config,imported_active_hash=active_hash,hosts=hosts,imported_managed_hosts=hosts,imported_backends=backends,
                                imported_routes=routes,imported_route_frontends=list(dict.fromkeys(r['frontend'] for r in rules)),imported_maps=maps or [],imported_sources=sources or [],
-                               imported_map_hashes=map_hashes or []))).model_dump(),
+                               imported_map_hashes=map_hashes or [])))).model_dump(),
             'proxies':proxies,'warnings':warnings+map_warnings,
             'summary':{'frontends':sum(p['kind'] in ('frontend','listen') for p in proxies),
                        'backends':sum(p['kind'] in ('backend','listen') for p in proxies),
@@ -378,7 +382,7 @@ def document_fingerprint(config):
 
 
 def remember_document(config,doc):
-    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends):return strip_document_metadata(config)
+    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends or any(r.access_policy for r in doc.imported_routes)):return strip_document_metadata(config)
     snapshot=doc.model_dump(exclude={'version','imported_active_hash','imported_sources','imported_map_hashes'})
     if snapshot['imported_config'] is not None:snapshot['imported_config']=strip_document_metadata(snapshot['imported_config'])
     payload={'document':snapshot,'fingerprint':document_fingerprint(config)}

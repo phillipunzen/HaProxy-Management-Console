@@ -25,9 +25,10 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.basic_auth import inject
     from backend.haproxy_config import remember_document
     from backend.managed_proxy import enhance
+    from backend.access_control import inject as restrict
     if doc.imported_config is not None:
         from backend.haproxy_config import generate_imported
-        return remember_document(inject(enhance(generate_imported(doc),doc,capabilities),doc,basic_auth),doc)
+        return remember_document(restrict(inject(enhance(generate_imported(doc),doc,capabilities),doc,basic_auth),doc),doc)
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):
@@ -73,4 +74,4 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         for i, server in enumerate(host.servers):
             tls = backend_tls(server)
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
-    return remember_document(inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth),doc)
+    return remember_document(restrict(inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth),doc),doc)
