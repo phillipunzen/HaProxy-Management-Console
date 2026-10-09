@@ -17,6 +17,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete, func
@@ -175,6 +176,12 @@ async def lifespan(app):
     task.cancel()
 
 app=FastAPI(title='HAProxy Control',version='0.1.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request,error):
+    # Model-level validation otherwise echoes the complete request, including
+    # DNS tokens. Field locations and messages are sufficient for the UI.
+    return JSONResponse({'detail':[{k:v for k,v in e.items() if k in ('loc','msg','type')} for e in error.errors()]},status_code=422)
 app.include_router(basic_auth_api.router(admin,operator,audit))
 app.include_router(infrastructures.router(current_user,admin,audit))
 
@@ -608,7 +615,7 @@ def certificates(id:int,user=Depends(current_user),db=Depends(get_db)): return a
 @app.post('/api/instances/{id}/certificates/issue')
 def issue(id:int,body:CertificateIn,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);audit(db,user.username,'certificate.issue.requested',i.name,','.join(body.domains));db.commit()
-    try: result=agent(i,'/certificates/issue','POST',body.model_dump(),timeout=300)
+    try: result=acme_request(i,'/certificates/issue',body,300)
     except HTTPException as e:
         audit(db,user.username,'certificate.issue.failed',i.name,str(e.detail));db.commit();raise
     audit(db,user.username,'certificate.issued',i.name,body.name);db.commit();return result
@@ -643,8 +650,19 @@ def update_certificate_policy(id:int,name:str,body:CertificatePolicyIn,user=Depe
 
 @app.post('/api/instances/{id}/certificates/adopt-lego')
 def adopt_lego(id:int,body:CertificateAdoptIn,user=Depends(operator),db=Depends(get_db)):
-    i=instance(db,id);result=agent(i,'/certificates/adopt-lego','POST',body.model_dump(),timeout=65)
+    i=instance(db,id);result=acme_request(i,'/certificates/adopt-lego',body,65)
     audit(db,user.username,'certificate.lego.adopted',i.name,body.name);db.commit();return result
+
+def acme_request(i,path,body,timeout):
+    if body.dns_token or body.dns_credential:
+        if not agent(i).get('dns_credentials_ui'):
+            raise HTTPException(422,'Für DNS-Tokens im Dialog zuerst unter Server den Agenten aktualisieren und Zertifikate neu öffnen.')
+    try:return agent(i,path,'POST',body.acme_payload(),timeout=timeout)
+    except HTTPException as error:
+        detail=error.detail if isinstance(error.detail,str) else json.dumps(error.detail,ensure_ascii=False)
+        for token in (body.dns_token,body.dns_zone_token):
+            if token:detail=detail.replace(token.get_secret_value(),'[geschützt]')
+        raise HTTPException(error.status_code,detail) from None
 
 @app.get('/api/certificate-guide')
 def certificate_guide(user=Depends(current_user)):

@@ -240,3 +240,106 @@ def test_interval_schedule_and_state_survive_agent_restart(lego_profile,monkeypa
 @pytest.mark.parametrize('value',[{'daily_time':'25:00'},{'interval_hours':0},{'timezone':'no/such/zone'}])
 def test_invalid_renewal_settings(value):
     with pytest.raises(ValidationError):RenewalSettingsIn(**value)
+
+
+@pytest.mark.parametrize('provider,variable',[('cloudflare','CF_DNS_API_TOKEN'),('hetzner','HETZNER_API_TOKEN')])
+def test_ui_dns_tokens_issue_and_renew_without_profile_configuration(tmp_path,monkeypatch,provider,variable):
+    p={'config_path':str(tmp_path/'proxy.cfg'),'cert_dir':str(tmp_path/'certs')}
+    monkeypatch.setattr(a,'STATE_DIR',tmp_path);monkeypatch.setattr(a,'PROFILES',{'test':p})
+    body=CertificateIn(name='site',domains=['example.com','*.example.com'],email='admin@example.com',challenge='dns',provider=provider,staging=False,dns_token='private-api-token')
+    calls=[];installs=[]
+    def run(args,timeout):
+        calls.append(args)
+        env=Path(args[args.index('--env-file')+1])
+        assert env.read_text()==variable+'=private-api-token\n'
+        assert env.stat().st_mode & 0o777==0o600 and env.parent.stat().st_mode & 0o777==0o700
+        assert args[args.index('--dns')+1]==provider
+        assert 'private-api-token' not in ' '.join(args)
+        directory=Path(args[args.index('--path')+1])/'certificates';directory.mkdir(parents=True,exist_ok=True)
+        (directory/'site.crt').write_bytes(b'cert');(directory/'site.key').write_bytes(b'key')
+    monkeypatch.setattr(a,'run',run)
+    def install(p,name,pem,staging=False):
+        target=Path(p['cert_dir']);target.mkdir(exist_ok=True);(target/(name+'.pem')).write_bytes(pem)
+        installs.append(name);return {'name':name}
+    monkeypatch.setattr(a,'install_pem',install)
+    assert jobs.issue(p,body)=={'name':'site'}
+    entry=next(iter(jobs.entries(p).values()))
+    assert entry['engine']=='lego' and 'private-api-token' not in a.cert_state(p).read_text()
+    assert 'dns_token' not in entry['request'] and entry['request']['dns_credential']
+    public=jobs.credentials_public(p)
+    assert len(public)==1 and public[0]['provider']==provider and 'private-api-token' not in json.dumps(public)
+    # Fresh request model and file-backed state: management stays offline during renewal.
+    assert jobs.renew(p)=={'checked':1,'renewed':[],'errors':[]}
+    assert len(calls)==2 and installs==['site']
+    assert '--renew-force' not in calls[1]
+    jobs.renew(p,name='site',force=True);assert '--renew-force' in calls[-1]
+
+
+def test_stored_credentials_reuse_is_scoped_to_profile_and_provider(lego_profile):
+    p=lego_profile
+    body=lego_body().model_copy(update={'dns_token':CertificateIn(name='x',domains=['example.com'],email='admin@example.com',challenge='dns',provider='cloudflare',dns_token='cf-secret').dns_token})
+    with jobs.dns_access(p,body) as (request,file):
+        id=request.dns_credential
+        assert 'cf-secret' in file.read_text()
+        with jobs.dns_access(p,request) as (_,reused):assert reused==file
+        q=p|{'config_path':p['config_path']+'.other'}
+        with pytest.raises(HTTPException):jobs.credential_file(q,id,'cloudflare')
+        with pytest.raises(HTTPException):jobs.credential_file(p,id,'hetzner')
+    with pytest.raises(HTTPException):jobs.credential_paths(p,'../../secret')
+
+
+def test_two_jobs_can_keep_separate_cloudflare_accounts(lego_profile):
+    p=lego_profile;files=[]
+    for name,token in [('first','token-first'),('second','token-second')]:
+        body=CertificateIn(name=name,domains=['example.com'],email='admin@example.com',challenge='dns',provider='cloudflare',dns_token=token)
+        with jobs.dns_access(p,body) as (_,file):files.append(file)
+    assert files[0]!=files[1] and 'token-first' in files[0].read_text() and 'token-second' in files[1].read_text()
+
+
+def test_cloudflare_optional_zone_token_and_failed_job_cleanup(lego_profile,monkeypatch):
+    p=lego_profile;body=CertificateIn(name='new',domains=['example.com'],email='admin@example.com',challenge='dns',provider='cloudflare',dns_token='dns-secret',dns_zone_token='zone-secret')
+    def fail(args,timeout):
+        env=Path(args[args.index('--env-file')+1]).read_text()
+        assert 'CF_DNS_API_TOKEN=dns-secret\n' in env and 'CF_ZONE_API_TOKEN=zone-secret\n' in env
+        raise HTTPException(422,'403 invalid token Authorization: dns-secret zone-secret')
+    monkeypatch.setattr(a,'run',fail)
+    with pytest.raises(HTTPException) as error:jobs.issue(p,body)
+    assert 'dns-secret' not in str(error.value.detail) and 'zone-secret' not in str(error.value.detail)
+    assert 'DNS-Anmeldung' in error.value.detail
+    assert jobs.entries(p)=={} and list(jobs.credential_dir(p).iterdir())==[]
+
+
+def test_reload_failure_removes_new_credentials_without_changing_previous_job(lego_profile,monkeypatch):
+    p=lego_profile;previous={'old':{'name':'old','staging':False,'engine':'certbot'}}
+    jobs.save_entries(p,previous)
+    monkeypatch.setattr(a,'run',lambda *args,**kw:'ok')
+    monkeypatch.setattr(jobs,'lego_pem',lambda *args:b'certkey')
+    def fail(*args,**kw):raise HTTPException(422,'reload failed')
+    monkeypatch.setattr(a,'install_pem',fail)
+    body=CertificateIn(name='new',domains=['example.com'],email='admin@example.com',challenge='dns',provider='hetzner',dns_token='hz-secret')
+    with pytest.raises(HTTPException):jobs.issue(p,body)
+    assert jobs.entries(p)==previous and list(jobs.credential_dir(p).iterdir())==[]
+
+
+def test_http_auto_keeps_certbot_and_never_writes_dns_secrets(lego_profile,monkeypatch):
+    p=lego_profile|{'acme_webroot':'/var/lib/webroot','letsencrypt_dir':str(a.STATE_DIR/'letsencrypt')}
+    body=CertificateIn(name='web',domains=['example.com'],email='admin@example.com',challenge='http')
+    calls=[]
+    def run(args,timeout):
+        calls.append(args);directory=Path(p['letsencrypt_dir'])/'live'/args[args.index('--cert-name')+1];directory.mkdir(parents=True)
+        (directory/'fullchain.pem').write_bytes(b'cert');(directory/'privkey.pem').write_bytes(b'key')
+    monkeypatch.setattr(a,'run',run);monkeypatch.setattr(a,'install_pem',lambda *args:{'name':'web'})
+    assert jobs.issue(p,body)=={'name':'web'}
+    assert '--webroot' in calls[0] and not jobs.credential_dir(p).exists()
+    assert next(iter(jobs.entries(p).values()))['engine']=='certbot'
+
+
+@pytest.mark.parametrize('fields',[{'dns_token':'bad\nCF_ZONE_API_TOKEN=injected'},{'dns_token':' space '},{'dns_token':'x'*513},{'provider':'hetzner','dns_token':'ok','dns_zone_token':'wrong'},{'dns_zone_token':'alone'},{'challenge':'http','dns_token':'wrong'},{'dns_token':'ok','dns_credential':'a'*32},{'dns_credential':'../../secret'},{'provider':'unsupported'}])
+def test_dns_credential_validation(fields):
+    with pytest.raises(ValidationError):CertificateIn(**({'name':'x','domains':['example.com'],'email':'admin@example.com','challenge':'dns','provider':'cloudflare'}|fields))
+
+
+def test_certificate_repr_and_json_never_disclose_token():
+    body=CertificateIn(name='x',domains=['example.com'],email='admin@example.com',challenge='dns',provider='cloudflare',dns_token='hidden-token')
+    assert 'hidden-token' not in repr(body) and 'hidden-token' not in body.model_dump_json()
+    assert body.acme_payload()['dns_token']=='hidden-token'

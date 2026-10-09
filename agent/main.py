@@ -19,6 +19,8 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from backend.schemas import CertificateIn,CertificateAdoptIn,CertificateRenewIn,RenewalSettingsIn,CertificatePolicyIn
 from agent import certificates as certificate_jobs
@@ -290,6 +292,10 @@ async def lifespan(app):
 
 app=FastAPI(title='HAProxy Control Agent',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 
+@app.exception_handler(RequestValidationError)
+async def validation_error(request,error):
+    return JSONResponse({'detail':[{k:v for k,v in e.items() if k in ('loc','msg','type')} for e in error.errors()]},status_code=422)
+
 @app.middleware('http')
 async def limits(request,call_next):
     length=request.headers.get('content-length','0')
@@ -309,8 +315,10 @@ def health(): return {'status':'ok'}
 @app.get('/profiles/{profile}')
 def capabilities(profile: str,p=Depends(auth)):
     return {k:v for k,v in p.items() if k in ('kind','runtime_socket_config','cert_dir_config','container','service')} | {
-        'dns_providers':list(p.get('dns_providers',{})), 'http_challenge':bool(p.get('acme_webroot')),
-        'automatic_renewal':True,'certificate_management':True,'acme_engines':['certbot']+(['lego'] if p.get('lego') else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
+        'dns_providers':['cloudflare','hetzner'], 'http_challenge':bool(p.get('acme_webroot')),
+        'dns_credentials_ui':True,'dns_credentials':certificate_jobs.credentials_public(p),
+        'lego_adoption':bool(p.get('lego')),'lego_host_credentials':bool(p.get('lego',{}).get('env_file')),
+        'automatic_renewal':True,'certificate_management':True,'acme_engines':['certbot']+(['lego'] if certificate_jobs.lego_ready(p) else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
 
 @app.get('/profiles/{profile}/config-bundle')
 def config_bundle(profile: str,p=Depends(auth)):

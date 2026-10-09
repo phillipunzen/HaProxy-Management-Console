@@ -199,3 +199,25 @@ def test_incomplete_listener_remains_editable_in_layout(api,monkeypatch):
     response=client.get('/api/instances/1/proxy-layout')
     assert response.status_code==200 and response.json()['error']
     assert 'fe_tcp' in {f['name'] for f in response.json()['frontends']}
+
+
+def test_dns_credentials_transport_redaction_and_old_agent_detection(api,monkeypatch):
+    from fastapi import HTTPException
+    from backend.db import Audit
+    client,factory=api;calls=[]
+    payload={'name':'web','domains':['example.com'],'email':'admin@example.com','challenge':'dns','provider':'hetzner','dns_token':'hidden-hetzner-token'}
+    def agent(i,path='',method='GET',body=None,timeout=10):
+        calls.append((i.id,i.profile,path,method,body))
+        if not path:return {'dns_credentials_ui':True}
+        assert body['dns_token']=='hidden-hetzner-token' and body['engine']=='auto'
+        raise HTTPException(422,{'error':'token hidden-hetzner-token failed'})
+    monkeypatch.setattr(main,'agent',agent)
+    response=client.post('/api/instances/1/certificates/issue',json=payload)
+    assert response.status_code==422 and 'hidden-hetzner-token' not in response.text
+    assert calls[-1][:4]==(1,'native','/certificates/issue','POST')
+    with factory() as db:assert 'hidden-hetzner-token' not in str([(e.action,e.detail) for e in db.scalars(select(Audit)).all()])
+    calls.clear();monkeypatch.setattr(main,'agent',lambda *args,**kw:calls.append(args) or {})
+    response=client.post('/api/instances/1/certificates/issue',json=payload)
+    assert response.status_code==422 and 'Agenten aktualisieren' in response.text and len(calls)==1
+    response=client.post('/api/instances/1/certificates/issue',json=payload|{'domains':['invalid-domain']})
+    assert response.status_code==422 and 'hidden-hetzner-token' not in response.text and len(calls)==1

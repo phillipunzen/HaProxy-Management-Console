@@ -15,7 +15,7 @@ UMask=0077
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=-/etc/haproxy -/etc/letsencrypt
+ReadWritePaths=-/etc/haproxy -/etc/letsencrypt -/etc/lego
 
 [Install]
 WantedBy=multi-user.target

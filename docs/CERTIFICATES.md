@@ -2,6 +2,24 @@
 
 Zuerst den Zielserver bzw. seine Infrastruktur auswählen. Zertifikate und Aufträge gehören ausschließlich zu diesem Agent-Profil. Private Schlüssel und DNS-Zugangsdaten bleiben auf dem HAProxy-Host.
 
+## Zertifikat anfordern: HTTP oder DNS
+
+1. Zielserver auswählen und **Zertifikate → Zertifikat anfordern** öffnen.
+2. **DNS-Challenge** oder **HTTP-Challenge** wählen. Die Anwendung verwendet automatisch LEGO für DNS und Certbot für HTTP; eine ACME-Client-Auswahl ist nicht erforderlich. Bestehende Certbot- und LEGO-Aufträge werden weiterhin mit ihrem bisherigen Client erneuert.
+3. Bei DNS **Cloudflare** oder **Hetzner Cloud** auswählen und den API-Token direkt im verdeckten Feld eingeben. Optional einen bereits gespeicherten Zugang **dieses Servers** auswählen. Ein neuer Auftrag kann einen eigenen Token erhalten, etwa für ein anderes Kundenkonto. Provider-Wechsel leert die Token-Felder.
+4. PEM-Name, Domains und ACME-E-Mail eingeben. Erst mit Staging testen; für ein vertrauenswürdiges Produktionszertifikat anschließend Staging deaktivieren. Wildcards benötigen DNS.
+5. Das Produktionszertifikat beim Proxy Host bzw. HTTPS-Frontend zuweisen und die erzeugte Konfiguration prüfen und anwenden. Der Erneuerungszeitplan verwendet den gespeicherten Zugang automatisch.
+
+**Cloudflare:** API-Token mit **Zone → DNS → Bearbeiten** und **Zone → Zone → Lesen**, auf alle angegebenen Zonen beschränkt. Optional einen zweiten Zone-Token im Dialog angeben, wenn die Leserechte aufgeteilt sind. Die Anwendung übergibt `CF_DNS_API_TOKEN` und optional `CF_ZONE_API_TOKEN` an LEGO.
+
+**Hetzner Cloud:** In der [Hetzner Console](https://console.hetzner.cloud/) das Projekt mit den DNS-Zonen öffnen und einen API-Token mit **Lesen & Schreiben** erzeugen. Diesen im Dialog hinterlegen. Unterstützt wird die aktuelle Cloud-DNS-API, nicht ein alter API-Key aus `dns.hetzner.com`. LEGO v5.5.2 verwendet dafür den Provider `hetzner` mit `HETZNER_API_TOKEN`.
+
+**Einrichtung:** Unter **Server → Agent aktualisieren** den Einzeiler auf jedem HAProxy-Host ausführen. Der Installer installiert LEGO **v5.5.2** für Linux amd64/arm64 nach `<Agent-Verzeichnis>/bin/lego`, prüft den Download gegen eine fest hinterlegte SHA-256-Prüfsumme und erhält vorhandene Profile und Tokens. Ein global installiertes LEGO wird nicht ersetzt. Für neue DNS-Aufträge muss kein `lego`-Objekt oder DNS-Plugin von Hand eingerichtet werden. Bei manueller Agent-Installation das passende offizielle LEGO-Binary nach `bin/lego` im Arbeitsverzeichnis legen und ausführbar machen; Download-Prüfsummen mit dem Installer abgleichen.
+
+**Speicherung:** DNS-Zugangsdaten werden über die authentifizierte Agent-Verbindung an den ausgewählten Host geschickt. Sie liegen dort in eigenen Dateien unter `/var/lib/haproxy-control/dns-credentials/<Profilkennung>/`, mit Verzeichnisrechten **0700** und Dateirechten **0600**. Die Dateien enthalten die Tokens im Klartext und müssen wie private Schlüssel gesichert werden. Die Management-Datenbank, ACME-Auftragsdateien, API-Leseresultate und Audit-Einträge enthalten keine DNS-Tokens. Ein gespeicherter Zugang lässt sich ausschließlich im selben Agent-Profil und für denselben Provider wiederverwenden. Neue Tokens werden erst bei einem erfolgreichen Auftrag behalten. Bei HTTP werden keine DNS-Zugangsdaten übertragen. Auch Agent-Verbindungen über HTTP im privaten LAN verschlüsseln den Transport nicht; für verschlüsselten Token-Transport Agent-TLS verwenden, siehe [AGENT.md](AGENT.md).
+
+**HTTP:** Port 80, die öffentliche DNS-Auflösung und die Weiterleitung von `/.well-known/acme-challenge/` zum Webroot müssen eingerichtet sein. Die [HTTP-Anleitung](AGENT.md#http-01) gilt für native und Docker-Instanzen. HTTP braucht keinen Provider-Token und unterstützt keine Wildcards.
+
 ## Zeitplan und manuelle Erneuerung
 
 Unter **Zertifikate → Zeitplan** automatische Erneuerung aktivieren oder pausieren. Entweder ein Stundenintervall oder täglich eine Uhrzeit mit Zeitzone einstellen, beispielsweise **03:15 / Europe/Berlin**. Der Zeitplan läuft auf dem Agenten auch bei ausgeschalteter Management-Oberfläche. Eine verpasste tägliche Prüfung wird nach dem Agent-Start nachgeholt; fehlgeschlagene Prüfungen werden beim nächsten geplanten Termin erneut versucht. Der Agent kontrolliert die Fälligkeit etwa jede Minute. Nächste Prüfung, letzte erfolgreiche Prüfung und Fehler sind sichtbar.
@@ -16,7 +34,7 @@ Für diese Funktionen einen aktuellen Agenten verwenden: **Server → Agent aktu
 
 ## Bestehenden LEGO-Auftrag übernehmen
 
-Unterstützt wird **LEGO v5** mit `lego run`, `--env-file`, `--cert.name` und `--renew-force`. Das entspricht dem gezeigten Cron-Befehl. LEGO bleibt auf dem HAProxy-Host installiert; im Management-Container wird es nicht benötigt. Vor einem Wechsel von LEGO v4 die offizielle [v5-Migrationsanleitung](https://go-acme.github.io/lego/migration/cli/) beachten. Das Tool führt keine automatische Migration oder LEGO-Aktualisierung aus.
+Unterstützt wird **LEGO v5** mit `lego run`, `--env-file`, `--cert.name` und `--renew-force`. Das entspricht dem gezeigten Cron-Befehl. LEGO bleibt auf dem HAProxy-Host installiert; im Management-Container wird es nicht benötigt. Vor einem Wechsel von LEGO v4 die offizielle [v5-Migrationsanleitung](https://go-acme.github.io/lego/migration/cli/) beachten. Eine Migration bestehender v4-Daten wird nicht automatisch durchgeführt; das Agent-Update installiert ein eigenes v5.5.2-Binary für neue Aufträge.
 
 1. Auf dem HAProxy-Host `lego --version` prüfen.
 2. In `/etc/haproxy-control/agent.json` im betreffenden Profil zusätzlich folgendes `lego`-Objekt einfügen. Vorhandene Profilfelder einschließlich Token erhalten. `binary` an die Ausgabe von `command -v lego` anpassen.
@@ -31,7 +49,7 @@ Unterstützt wird **LEGO v5** mit `lego run`, `--env-file`, `--cert.name` und `-
 }
 ```
 
-3. Die vorhandene Env-Datei weiterverwenden; sie enthält z. B. `CF_DNS_API_TOKEN` und optional `CF_ZONE_API_TOKEN`. Zugangsdaten nicht in die WebUI kopieren. Datei nur für root lesbar machen und Agent neu starten:
+3. Die vorhandene Env-Datei weiterverwenden; sie enthält z. B. `CF_DNS_API_TOKEN` und optional `CF_ZONE_API_TOKEN`. Die bestehende Datei kann im Übernahmedialog mit **Vorhandene LEGO-Zugangsdaten auf dem Host verwenden** weiter genutzt werden. Alternativ einen neuen Token im Dialog hinterlegen. Datei nur für root lesbar machen und Agent neu starten:
 
 ```bash
 sudo chmod 600 /etc/lego/dns_api.env
@@ -65,15 +83,15 @@ Die Übernahme liest `.crt` und `.key` aus `/etc/lego/certificates/`, installier
 
 ## Neue Zertifikate: pro Site, pro Domain oder gemeinsam
 
-**Zertifikate → Zertifikat anfordern** bietet den ACME-Client sowie drei Arten der Domain-Auswahl:
+**Zertifikate → Zertifikat anfordern** bietet die Challenge-Auswahl sowie drei Arten der Domain-Auswahl:
 
 - Eine einzelne Reverseproxy-Site.
 - Alle Sites des ausgewählten Servers gemeinsam; die angezeigte Liste lässt sich ergänzen, etwa um Root-Domains oder Wildcards.
 - Eine eigene Liste aus bis zu 30 Domains, etwa `example.com` und `*.example.com` oder mehrere unabhängige Domains.
 
-Ein gemeinsames Zertifikat benötigt ein Cloudflare-Token, das alle betroffenen Zonen validieren darf. Für eigene Zertifikate pro Domain getrennte Aufträge mit unterschiedlichen PEM-Namen anlegen. Neu ausgestellte LEGO-Zertifikate verwenden eigene Verzeichnisse unter `<lego.path>/control/<Profilkennung>/`; so kollidieren Aufträge mit denselben Domainnamen nicht mit dem übernommenen Sammelauftrag. Staging und Produktion haben getrennte Verzeichnisse. Ein bestehender LEGO-Auftrag kann nur einem Agent-Profil bzw. PEM-Namen zugewiesen sein.
+Ein gemeinsames DNS-Zertifikat benötigt einen Zugang beim gewählten Provider, der alle betroffenen Zonen validieren darf. Domains verschiedener Provider auf separate Zertifikatsaufträge verteilen. Für eigene Zertifikate pro Domain getrennte Aufträge mit unterschiedlichen PEM-Namen anlegen. Neu ausgestellte LEGO-Zertifikate verwenden eigene Verzeichnisse unter `<lego.path>/control/<Profilkennung>/` bzw. standardmäßig `/var/lib/haproxy-control/acme/control/<Profilkennung>/`; so kollidieren Aufträge mit denselben Domainnamen nicht mit dem übernommenen Sammelauftrag. Staging und Produktion haben getrennte Verzeichnisse. Ein bestehender LEGO-Auftrag kann nur einem Agent-Profil bzw. PEM-Namen zugewiesen sein.
 
-HTTP-01 und Wildcards lassen sich nicht kombinieren. Für HTTP-01 den Webroot-Dienst und die Challenge-Weiterleitung einrichten; siehe [AGENT.md](AGENT.md). Certbot und sein Cloudflare-Plugin bleiben als alternative ACME-Engine unterstützt.
+HTTP-01 und Wildcards lassen sich nicht kombinieren. Für HTTP-01 den Webroot-Dienst und die Challenge-Weiterleitung einrichten; siehe [AGENT.md](AGENT.md). Bereits vorhandene Certbot-Aufträge und ihre lokal konfigurierten Plugins bleiben unterstützt.
 
 ## Eigene PEM-Dateien und Listener-Zuweisung
 
@@ -83,4 +101,4 @@ Beim Proxy Host bzw. der übernommenen Domain-Zuordnung lässt sich ein Produkti
 
 HAProxy wählt beim TLS-Verbindungsaufbau per SNI aus den geladenen Zertifikaten. Zertifikate sind an Domains/Listener gebunden, nicht an URL-Pfade. Für getrennte Zertifikate pro Domain sollten die SAN-Listen nicht überlappen. Der Generator prüft, ob gewählte Zertifikate auf dem Zielserver vorhanden, gültig und für die ausgewählte Domain passend sind. Danach **Konfiguration erzeugen → Prüfen → Anwenden**.
 
-Referenzen: [LEGO v5-Befehle](https://go-acme.github.io/lego/references/ref-flags/), [Cloudflare mit LEGO](https://go-acme.github.io/lego/dns/cloudflare/), [Certbot-Erneuerung](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates), [HAProxy TLS und SNI](https://www.haproxy.com/documentation/haproxy-configuration-tutorials/security/ssl-tls/basics-enable-tls/).
+Referenzen: [LEGO v5-Befehle](https://go-acme.github.io/lego/references/ref-flags/), [Cloudflare mit LEGO](https://go-acme.github.io/lego/dns/cloudflare/), [Hetzner mit LEGO](https://go-acme.github.io/lego/dns/hetzner/), [Hetzner Cloud-DNS](https://docs.hetzner.com/networking/dns/migration-to-hetzner-console/features-and-differences/), [Certbot-Erneuerung](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates), [HAProxy TLS und SNI](https://www.haproxy.com/documentation/haproxy-configuration-tutorials/security/ssl-tls/basics-enable-tls/).

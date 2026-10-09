@@ -88,7 +88,7 @@ Anschließend in der WebUI **Server → Server verbinden**:
 | Agent-Token | Der Wert `token` des gewählten Profils. |
 | HTTP-Verbindung im privaten Netz zulassen | Für das HTTP-Beispiel aktivieren; bei HTTPS deaktiviert lassen. |
 
-**Verbindung prüfen & speichern** wählen. Der Installationstyp wird automatisch erkannt. Cloudflare-Tokens werden auf dem jeweiligen HAProxy-Agenten konfiguriert; auch das ist in der Agent-Anleitung beschrieben.
+**Verbindung prüfen & speichern** wählen. Der Installationstyp wird automatisch erkannt. Cloudflare- und Hetzner-Cloud-Tokens lassen sich im Zertifikatsdialog hinterlegen; der aktuelle Agent-Installer richtet LEGO automatisch ein. [Zertifikatsanleitung](docs/CERTIFICATES.md).
 
 ## Betrieb und Updates
 

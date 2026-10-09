@@ -19,7 +19,7 @@ Die Gruppierung ändert keine Agent-Adresse, Zugangstokens, Konfigurationen, Zer
 
 Die Zertifikatsliste zeigt das Zertifikatsverzeichnis dieses Profils. Es gibt keine automatische Verteilung an sämtliche Server oder an alle Mitglieder einer Infrastruktur. Soll ein bestehendes PEM auf einem zweiten Server verfügbar sein, dort ausdrücklich den zweiten Zielserver auswählen und das PEM erneut importieren. Private Schlüssel verbleiben auf den Agent-Hosts; die Verwaltung bietet keinen zentralen Schlüssel-Export oder Zertifikats-Tresor.
 
-Cloudflare-Zugangsdaten werden je Agent-Profil unter `dns_providers.cloudflare.credentials_file` hinterlegt. Bei verschiedenen Cloudflare-Konten separate Credential-Dateien verwenden, zum Beispiel `/etc/haproxy-control/firma-a-cloudflare.ini` und `/etc/haproxy-control/homelab-cloudflare.ini`. Die zugehörigen DNS-Tokens müssen die jeweiligen Zonen bearbeiten dürfen. Mehrere Domains und Wildcards pro Zertifikat werden unterstützt.
+Cloudflare- und Hetzner-Cloud-Zugangsdaten werden im Zertifikatsdialog des ausgewählten Servers hinterlegt. Für unterschiedliche Konten eigene Tokens pro Auftrag verwenden; gespeicherte Zugänge können nur innerhalb desselben Agent-Profils und Providers wiederverwendet werden. Mehrere Domains und Wildcards pro Zertifikat werden unterstützt, solange sie mit demselben Provider-Zugang validiert werden können. Bestehende Certbot-Aufträge behalten ihre lokal konfigurierten Credential-Dateien. [Einrichtung und Provider-Rechte](CERTIFICATES.md).
 
 ### Mehrere Profile auf demselben Host
 

@@ -6,7 +6,7 @@ Die Management-WebUI spricht mit einem **Agenten auf dem HAProxy-Host**. Dieser 
 
 Unter **Server → Server verbinden** Nativ oder Docker wählen, Host-IP und Pfade angeben. Der Assistent erstellt einen individuellen Einzeiler mit Token, Agent-Adresse und SHA-256-Prüfsummen. Auf dem HAProxy-Host per SSH ausführen und anschließend im geöffneten Dialog **Verbindung prüfen & speichern** wählen. Der automatisch installierte Agent liegt unter `/opt/haproxy-control-agent`; seine Profile liegen wie bei der manuellen Installation unter `/etc/haproxy-control/agent.json`. Der Installer ergänzt bei Bedarf den Runtime-Socket, prüft vor dem HAProxy-Reload und stellt bei einem Fehler die alte Konfiguration wieder her. Bestehende Agent-Profile werden erhalten; ein vorhandenes Profil wird nicht durch einen neuen Token ersetzt.
 
-Voraussetzungen: Debian/Ubuntu mit systemd, curl, sudo, eine laufende HAProxy-Instanz und Netzwerkzugriff auf die Management-Adresse sowie Paketquellen. Bei Docker benötigt der Container die im Assistenten gezeigten Verzeichnis-Mounts; der Installer verändert die Containerdefinition nicht. Den Agent-Port nur für den Management-Host freigeben. Cloudflare-Zugangsdaten anschließend wie unten beschrieben eintragen. Der Befehl enthält den Agent-Token und gehört nicht in öffentliche Tickets oder Protokolle.
+Voraussetzungen: Debian/Ubuntu mit systemd, curl, sudo, eine laufende HAProxy-Instanz und Netzwerkzugriff auf die Management-Adresse sowie Paketquellen. Bei Docker benötigt der Container die im Assistenten gezeigten Verzeichnis-Mounts; der Installer verändert die Containerdefinition nicht. Den Agent-Port nur für den Management-Host freigeben. Cloudflare- oder Hetzner-Token anschließend im Zertifikatsdialog hinterlegen; LEGO wird vom Installer mit eingerichtet. Der Befehl enthält den Agent-Token und gehört nicht in öffentliche Tickets oder Protokolle.
 
 Die folgenden Schritte erklären die **manuelle Alternative** und die Vorbereitung der HAProxy-Instanz. Bei einem bereits vorhandenen Agenten im Assistenten **Agent bereits installiert** wählen.
 
@@ -258,33 +258,13 @@ docker compose -f docker-compose.yml exec app python -c 'import httpx; r=httpx.g
 
 Agent-Logs: `sudo journalctl -u haproxy-control-agent -n 100 --no-pager`. Management-Logs: `docker compose -f docker-compose.yml logs --tail 100 app`.
 
-## Cloudflare DNS-01
+## DNS-01: Cloudflare und Hetzner Cloud
 
-Cloudflare API-Token mit **Zone:DNS:Edit** und **Zone:Zone:Read**, auf die benötigten Zonen beschränkt. Ein Token kann mehrere Zonen erlauben; alternativ unterschiedliche Agent-Profile/Zugangsdaten verwenden.
+Nach dem Agent-Update unter **Zertifikate → Zertifikat anfordern → DNS-Challenge** den Provider auswählen und den API-Token im verdeckten Feld hinterlegen. Für Cloudflare **Zone:DNS:Edit** und **Zone:Zone:Read** auf allen benötigten Zonen erlauben. Für Hetzner Cloud einen **Lesen & Schreiben**-Projekt-Token aus der Hetzner Console verwenden; die DNS-Zonen müssen in diesem Projekt liegen. LEGO v5.5.2 wird vom Installer mit SHA-256-Prüfung in `bin/lego` installiert. Profile und globale LEGO-Installationen bleiben erhalten.
 
-```ini
-# /etc/haproxy-control/cloudflare.ini
-dns_cloudflare_api_token = DEIN_CLOUDFLARE_API_TOKEN
-```
+Gespeicherte Zugänge können für weitere Zertifikate desselben Profils und Providers wiederverwendet werden. Separate Tokens pro Auftrag sind möglich. Die Dateien liegen unter `/var/lib/haproxy-control/dns-credentials/` und sind nur für den Agent-Benutzer lesbar (0600, Verzeichnis 0700). Das Verzeichnis und die ACME-Daten unter `/var/lib/haproxy-control/acme/` sicher mit sichern; hier liegen Zugangsdaten und private Schlüssel. Im Management werden keine DNS-Tokens gespeichert oder zurückgegeben.
 
-```bash
-sudo chmod 600 /etc/haproxy-control/cloudflare.ini
-```
-
-Im Profil:
-
-```json
-"dns_providers": {
-  "cloudflare": {
-    "credentials_file": "/etc/haproxy-control/cloudflare.ini",
-    "propagation_seconds": 60
-  }
-}
-```
-
-Der Pluginname `dns-cloudflare` muss in `certbot plugins` verfügbar sein. In der WebUI Domains einzeln oder gemeinsam eingeben, z. B. `example.com`, `*.example.com`, `example.net`. Alle Domains müssen durch das Token und Cloudflare validierbar sein. Wildcards benötigen DNS-01.
-
-Zunächst Staging testen; Staging-Zertifikate liegen in `.staging/` und werden nicht für produktive TLS-Listener genutzt. Für Produktion Staging deaktivieren. Certbot erzeugt eine eigene Lineage je Profil, Zertifikatsname und Umgebung. Ein Produktionszertifikat wird nach Schlüsselprüfung installiert und HAProxy validiert und neu geladen. Die Aktivierung muss erfolgreich sein, damit die Anforderung als erfolgreich gilt.
+[Zertifikatsdialog, Provider-Rechte und LEGO-Übernahme](CERTIFICATES.md). Zunächst Staging testen; für Produktion Staging deaktivieren. Wildcards benötigen DNS-01. Bestehende Certbot-Aufträge verwenden weiterhin die bisherigen Credential-Dateien, etwa `dns_providers.cloudflare.credentials_file`, und brauchen weiterhin ihr Certbot-Plugin.
 
 ## HTTP-01
 
@@ -297,7 +277,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now haproxy-control-webroot
 ```
 
-Diese Unit bindet auf 127.0.0.1:8888. Im grafischen Editor **Listener → HTTP-01** aktivieren, den aus Sicht des HAProxy-Prozesses erreichbaren Webroot-Host setzen und Konfiguration anwenden. Bei Docker die private Host-IP verwenden und den Webroot-Dienst gezielt an diese Adresse binden; localhost im Container ist nicht der Host. Nur Challenge-Pfade öffentlich weiterleiten. Port 80 muss von Let's Encrypt erreichbar sein, auch wenn andere Anfragen zu HTTPS umgeleitet werden. A-/AAAA-Records müssen auf den richtigen Proxy zeigen. Bei mehreren HAProxy-Knoten muss jede Challenge-Anfrage den Webroot erreichen, auf dem Certbot den Token schreibt.
+Diese Unit bindet auf 127.0.0.1:8888. Wenn der Assistent nach `/opt/haproxy-control-agent` installiert hat, in der Webroot-Unit `WorkingDirectory` und den Pfad in `ExecStart` entsprechend anpassen; das tatsächliche Arbeitsverzeichnis zeigt `systemctl show --property=WorkingDirectory --value haproxy-control-agent`. Im grafischen Editor **Listener → HTTP-01** aktivieren, den aus Sicht des HAProxy-Prozesses erreichbaren Webroot-Host setzen und Konfiguration anwenden. Bei Docker die private Host-IP verwenden und den Webroot-Dienst gezielt an diese Adresse binden; localhost im Container ist nicht der Host. Nur Challenge-Pfade öffentlich weiterleiten. Port 80 muss von Let's Encrypt erreichbar sein, auch wenn andere Anfragen zu HTTPS umgeleitet werden. A-/AAAA-Records müssen auf den richtigen Proxy zeigen. Bei mehreren HAProxy-Knoten muss jede Challenge-Anfrage den Webroot erreichen, auf dem Certbot den Token schreibt.
 
 ## Erneuerung und Sicherungen
 
@@ -319,4 +299,4 @@ Mehrere `-f`-Dateien und Verzeichnisse erkennt der Agent automatisch aus dem lau
 
 ## Mehrere Infrastrukturen und Zertifikatsverzeichnisse
 
-In der WebUI lässt sich jedes Profil einer Infrastruktur zuordnen. Für mehrere Profile auf demselben Host separate Konfigurationsdateien, Runtime-Sockets und Zertifikatsverzeichnisse verwenden. Der aktuelle Installer lehnt gemeinsam genutzte oder ineinander liegende `cert_dir`-Pfade ab. Der Agent meldet vorhandene gemeinsame Verzeichnisse in seinen Capabilities und blockiert dort Zertifikatsschreibzugriffe einschließlich automatischer Erneuerung. Für unabhängige Cloudflare-Konten je Profil eigene Credential-Dateien konfigurieren. [Vollständige Anleitung](INFRASTRUCTURES.md). Bestehende Agenten über **Server → Agent aktualisieren** aktualisieren.
+In der WebUI lässt sich jedes Profil einer Infrastruktur zuordnen. Für mehrere Profile auf demselben Host separate Konfigurationsdateien, Runtime-Sockets und Zertifikatsverzeichnisse verwenden. Der aktuelle Installer lehnt gemeinsam genutzte oder ineinander liegende `cert_dir`-Pfade ab. Der Agent meldet vorhandene gemeinsame Verzeichnisse in seinen Capabilities und blockiert dort Zertifikatsschreibzugriffe einschließlich automatischer Erneuerung. Für unabhängige DNS-Konten eigene Tokens im Zertifikatsdialog hinterlegen; gespeicherte Zugänge sind pro Profil isoliert. [Vollständige Anleitung](INFRASTRUCTURES.md). Bestehende Agenten über **Server → Agent aktualisieren** aktualisieren.

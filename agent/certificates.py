@@ -1,6 +1,9 @@
 """Profile-scoped ACME jobs and renewal schedules. Credentials stay on the host."""
 import json
 import re
+import shutil
+import uuid
+from contextlib import contextmanager
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -88,24 +91,93 @@ def scheduled_check(p,now=None):
 
 
 def lego_config(p):
-    conf=p.get('lego')
-    if not conf:raise HTTPException(422,'LEGO v5 zuerst im Agent-Profil einrichten. Anleitung unter Zertifikate.')
+    # The installer supplies a private, pinned LEGO binary. Existing local
+    # configuration continues to control imported lineages and credentials.
+    conf={'binary':str(Path(__file__).resolve().parents[1]/'bin/lego'),
+          'path':str(services().STATE_DIR/'acme'),'resolvers':['1.1.1.1:53','8.8.8.8:53']} | p.get('lego',{})
     for key in ('path','env_file'):
-        value=conf.get(key,'')
+        if key not in conf:continue
+        value=conf[key]
         if not value.startswith('/') or '..' in value.split('/') or any(c.isspace() for c in value):
             raise HTTPException(422,'LEGO benötigt absolute lokale Pfade ohne Leerzeichen oder übergeordnete Verzeichnisse.')
     return conf
 
 
-def lego_args(p,body,directory,source_name,force=False):
+def lego_ready(p):
+    binary=lego_config(p)['binary']
+    return bool(shutil.which(binary))
+
+
+def credential_dir(p):
+    return services().STATE_DIR/'dns-credentials'/services().sha(p['config_path'])
+
+
+def credential_paths(p,id):
+    if not re.fullmatch(r'[a-f0-9]{32}',id):raise HTTPException(422,'Ungültiger DNS-Zugang.')
+    directory=credential_dir(p)
+    return directory/(id+'.json'),directory/(id+'.env')
+
+
+def credential_file(p,id,provider):
+    metadata,path=credential_paths(p,id)
+    try:value=json.loads(metadata.read_text())
+    except (OSError,ValueError):raise HTTPException(422,'DNS-Zugang fehlt auf diesem Server. Token erneut eingeben.')
+    if value.get('provider')!=provider or not path.is_file():raise HTTPException(422,'DNS-Zugang gehört nicht zu diesem Anbieter auf diesem Server.')
+    return path
+
+
+def credentials_public(p):
+    result={}
+    for entry in entries(p).values():
+        request=entry.get('request',{});id=request.get('dns_credential')
+        if not id:continue
+        try:
+            metadata,_=credential_paths(p,id)
+            value=json.loads(metadata.read_text())
+            credential_file(p,id,request['provider'])
+            result[id]={'id':id,'provider':value['provider'],'label':value['label']}
+        except (OSError,ValueError,KeyError,HTTPException):continue
+    return list(result.values())
+
+
+@contextmanager
+def dns_access(p,body):
+    """Write-once secrets per job/account; failed requests leave no credentials."""
+    created=[];file=None
+    try:
+        if body.challenge=='dns':
+            if body.dns_token:
+                id=uuid.uuid4().hex;metadata,file=credential_paths(p,id)
+                directory=file.parent;directory.mkdir(parents=True,exist_ok=True,mode=0o700);directory.chmod(0o700)
+                variables={'cloudflare':'CF_DNS_API_TOKEN','hetzner':'HETZNER_API_TOKEN'}
+                content=variables[body.provider]+'='+body.dns_token.get_secret_value()+'\n'
+                if body.dns_zone_token:content+='CF_ZONE_API_TOKEN='+body.dns_zone_token.get_secret_value()+'\n'
+                created=[file,metadata]
+                services().atomic(file,content.encode(),0o600)
+                services().atomic(metadata,json.dumps({'provider':body.provider,'label':body.name+(' · Staging' if body.staging else ' · Produktion')}).encode(),0o600)
+                body=body.model_copy(update={'dns_token':None,'dns_zone_token':None,'dns_credential':id})
+            elif body.dns_credential:file=credential_file(p,body.dns_credential,body.provider)
+            else:
+                file=lego_config(p).get('env_file')
+                if not file:raise HTTPException(422,'API-Token eingeben oder einen gespeicherten DNS-Zugang dieses Servers auswählen.')
+        yield body,file
+    except BaseException:
+        for path in created:path.unlink(missing_ok=True)
+        raise
+
+
+def lego_args(p,body,directory,source_name,force=False,credentials=None):
     conf=lego_config(p)
-    args=[conf.get('binary','lego'),'run','--accept-tos','--env-file',conf['env_file'],
+    args=[conf['binary'],'run','--accept-tos',
           '--email',body.email,'--server','letsencrypt-staging' if body.staging else 'letsencrypt',
           '--pem','--path',str(directory),'--cert.name',source_name,'--force-cert-domains']
     if force:args+=['--renew-force']
     if body.challenge=='dns':
-        if body.provider!='cloudflare':raise HTTPException(422,'LEGO-Anbindung unterstützt Cloudflare DNS-01.')
-        args+=['--dns','cloudflare']
+        if body.provider not in ('cloudflare','hetzner'):raise HTTPException(422,'Cloudflare oder Hetzner Cloud auswählen.')
+        if credentials is None and body.dns_credential:credentials=credential_file(p,body.dns_credential,body.provider)
+        credentials=credentials or conf.get('env_file')
+        if not credentials:raise HTTPException(422,'DNS-Zugangsdaten fehlen. Token im Zertifikatsdialog eingeben.')
+        args+=['--env-file',str(credentials),'--dns',body.provider]
         for resolver in conf.get('resolvers',[]):args+=['--dns.resolvers',resolver]
         wait=conf.get('propagation_wait')
         if wait:
@@ -116,6 +188,19 @@ def lego_args(p,body,directory,source_name,force=False):
         args+=['--http','--http.webroot',p['acme_webroot']]
     for domain in body.domains:args+=['--domains',domain]
     return args
+
+
+def run_lego(args):
+    # Provider errors can echo Authorization headers. Do not return or log raw
+    # subprocess output, even for jobs using an external, legacy env file.
+    try:return services().run(args,timeout=240)
+    except HTTPException as error:
+        detail=str(error.detail).lower()
+        if error.status_code in (502,504):message=error.detail
+        elif any(word in detail for word in ('unauthorized','forbidden','permission','invalid token','authentication','403','401')):
+            message='DNS-Anmeldung fehlgeschlagen. API-Token, Zonen und Schreib-/Leserechte beim gewählten Anbieter prüfen.'
+        else:message='LEGO konnte das Zertifikat nicht ausstellen oder erneuern. Domains, DNS-Zugang und DNS-Verteilung prüfen; zunächst Staging verwenden.'
+        raise HTTPException(error.status_code,message) from None
 
 
 def lego_pem(directory,source_name):
@@ -142,6 +227,8 @@ def ensure_lego_lineage(p,directory,source_name,body):
 
 
 def issue(p,body):
+    services().require_certificate_scope(p)
+    if body.engine=='auto':body=body.model_copy(update={'engine':'lego' if body.challenge=='dns' else 'certbot'})
     if body.engine=='lego':
         a=services();conf=lego_config(p)
         directory=Path(conf['path'])/'control'/a.sha(p['config_path'])[:16]/(body.name+('-staging' if body.staging else '-production'))
@@ -157,9 +244,14 @@ def _issue(p,body):
         source_name=body.name
         key='lego:'+a.sha(str(directory)+':'+source_name)
         ensure_target(p,key,body,values);ensure_lego_lineage(p,directory,source_name,body)
-        a.run(lego_args(p,body,directory,source_name),timeout=240)
-        pem=lego_pem(directory,source_name)
-        entry={'engine':'lego','directory':str(directory),'source_name':source_name,'request':body.model_dump()}
+        with dns_access(p,body) as (request,credentials):
+            run_lego(lego_args(p,request,directory,source_name,credentials=credentials))
+            pem=lego_pem(directory,source_name)
+            result=a.install_pem(p,body.name,pem,body.staging)
+            entry={'engine':'lego','directory':str(directory),'source_name':source_name,'request':request.model_dump(exclude={'dns_token','dns_zone_token'})}
+            values[key]=entry | {'name':body.name,'staging':body.staging,'automatic':body.automatic}
+            save_entries(p,values)
+        return result
     else:
         key,args=a.certbot_args(p,body)
         ensure_target(p,key,body,values)
@@ -174,6 +266,7 @@ def _issue(p,body):
 
 
 def adopt_lego(p,body):
+    if not p.get('lego'):raise HTTPException(422,'Für die Übernahme den bisherigen LEGO-Pfad im Agent-Profil eintragen. Neue Zertifikate benötigen diese Einstellung nicht.')
     a=services();conf=lego_config(p)
     with a.lock({'config_path':'lego:'+str(Path(conf['path']).resolve())+':'+body.source_name}):return _adopt_lego(p,body)
 
@@ -190,10 +283,11 @@ def _adopt_lego(p,body):
         domains=cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
     except (ValueError,x509.ExtensionNotFound):raise HTTPException(422,'LEGO-Zertifikat enthält keine gültigen Domains.')
     if set(domains)!=set(body.domains):raise HTTPException(422,'Alle Domains des vorhandenen LEGO-Zertifikats exakt übernehmen. Die erste Domain allein reicht bei einem Sammelzertifikat nicht aus.')
-    result=a.install_pem(p,body.name,pem)
-    values[key]={'name':body.name,'staging':False,'engine':'lego','directory':str(directory),
-        'source_name':body.source_name,'request':body.model_dump(exclude={'source_name'}),'automatic':body.automatic}
-    save_entries(p,values)
+    with dns_access(p,body) as (request,credentials):
+        result=a.install_pem(p,body.name,pem)
+        values[key]={'name':body.name,'staging':False,'engine':'lego','directory':str(directory),
+            'source_name':body.source_name,'request':request.model_dump(exclude={'source_name','dns_token','dns_zone_token'}),'automatic':body.automatic}
+        save_entries(p,values)
     return result
 
 
@@ -223,7 +317,7 @@ def renew(p,name=None,force=False,automatic=False):
             if e.get('engine')=='lego':
                 body=CertificateIn.model_validate(e['request'])
                 with a.lock({'config_path':'lego:'+str(Path(e['directory']).resolve())+':'+e['source_name']}):
-                    a.run(lego_args(p,body,e['directory'],e['source_name'],force),timeout=240)
+                    run_lego(lego_args(p,body,e['directory'],e['source_name'],force))
                     pem=lego_pem(e['directory'],e['source_name'])
             else:
                 args=[p.get('certbot_binary','certbot'),'renew','--non-interactive','--cert-name',key]

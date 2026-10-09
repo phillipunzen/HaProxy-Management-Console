@@ -70,3 +70,15 @@ def test_certificate_key_mismatch_rejected_before_install(fixture):
     pem=cert.public_bytes(serialization.Encoding.PEM)+k2.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption())
     result=c.post('/profiles/test/certificates/import',json={'name':'example','pem':pem.decode()},headers={'Authorization':'Bearer '+'a'*40})
     assert result.status_code==422 and not (Path(p['cert_dir'])/'example.pem').exists()
+
+
+def test_dns_capabilities_never_return_secrets_and_invalid_request_does_not_echo_tokens(fixture,monkeypatch):
+    c,p,_=fixture;headers={'Authorization':'Bearer '+'a'*40}
+    monkeypatch.setattr(a.certificate_jobs,'lego_ready',lambda p:True)
+    capabilities=c.get('/profiles/test',headers=headers)
+    assert capabilities.status_code==200
+    data=capabilities.json();assert data['dns_credentials_ui'] and data['dns_providers']==['cloudflare','hetzner'] and 'lego' in data['acme_engines']
+    invalid={'name':'x','domains':['*.example.com'],'email':'admin@example.com','challenge':'http','dns_token':'secret-input'}
+    result=c.post('/profiles/test/certificates/issue',json=invalid,headers=headers)
+    assert result.status_code==422 and 'secret-input' not in result.text
+    assert c.post('/profiles/test/certificates/issue',json=invalid).status_code==401

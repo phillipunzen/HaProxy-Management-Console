@@ -3,7 +3,7 @@ import re
 import unicodedata
 from typing import Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
 TOKEN = re.compile(r'^[a-zA-Z0-9_.-]+$')
 DOMAIN = re.compile(r'^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$')
@@ -347,8 +347,25 @@ class CertificateIn(BaseModel):
     challenge: Literal['http', 'dns'] = 'http'
     provider: str = Field(default='', pattern=r'^[a-z0-9-]*$')
     staging: bool = True
-    engine: Literal['certbot','lego'] = 'certbot'
+    engine: Literal['auto','certbot','lego'] = 'auto'
     automatic: bool = True
+    dns_token: SecretStr | None = None
+    dns_zone_token: SecretStr | None = None
+    dns_credential: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+
+    @field_validator('dns_token','dns_zone_token')
+    @classmethod
+    def dns_token_ok(cls,value):
+        if value is not None and not re.fullmatch(r'[a-zA-Z0-9._~-]{1,512}',value.get_secret_value()):
+            raise ValueError('API-Token ohne Leerzeichen eingeben (maximal 512 Zeichen).')
+        return value
+
+    def acme_payload(self):
+        # Only use for the authenticated agent request, never for job state or logs.
+        value=self.model_dump(mode='json',exclude={'dns_token','dns_zone_token'})
+        for key in ('dns_token','dns_zone_token'):
+            if getattr(self,key) is not None:value[key]=getattr(self,key).get_secret_value()
+        return value
 
     @model_validator(mode='after')
     def check(self):
@@ -361,6 +378,13 @@ class CertificateIn(BaseModel):
             raise ValueError('Wildcard-Zertifikate benötigen DNS-Challenges.')
         if self.challenge == 'dns' and not self.provider:
             raise ValueError('DNS-Anbieter erforderlich.')
+        if self.challenge=='dns' and self.engine in ('auto','lego') and self.provider not in ('cloudflare','hetzner'):
+            raise ValueError('DNS-Anbieter Cloudflare oder Hetzner Cloud auswählen.')
+        if self.dns_zone_token and self.provider!='cloudflare':raise ValueError('Ein Zone-Token wird nur bei Cloudflare unterstützt.')
+        if self.dns_token and self.dns_credential:raise ValueError('Neuen Token oder gespeicherten Zugang auswählen.')
+        if self.dns_zone_token and not self.dns_token:raise ValueError('DNS-Token für den separaten Zone-Token erforderlich.')
+        if (self.dns_token or self.dns_zone_token or self.dns_credential) and (self.challenge!='dns' or self.engine=='certbot'):
+            raise ValueError('DNS-Zugangsdaten benötigen eine DNS-Challenge mit automatischer ACME-Auswahl.')
         if len(set(self.domains))!=len(self.domains):raise ValueError('Domains müssen eindeutig sein.')
         return self
 

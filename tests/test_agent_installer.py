@@ -80,3 +80,28 @@ def test_shared_certificate_directory_rejected_before_config_change(setup):
     profile_file.parent.mkdir();profile_file.write_text(json.dumps({'profiles':{'other':{'token':'keep','config_path':'/other.cfg','runtime_socket':'/other.sock','cert_dir':p['cert_dir']}}}))
     with pytest.raises(SystemExit,match='eigenes Zertifikatsverzeichnis'):execute()
     assert config.read_text()==original and not calls
+
+
+@pytest.mark.parametrize('path',[None,'/etc/lego/customer','/var/lib/custom-acme'])
+def test_update_grants_only_configured_lego_store_without_resetting_unit_permissions(tmp_path,path):
+    source=(ROOT/'scripts/install-agent.sh').read_text()
+    code=source.split(" - <<'PY'\nimport json,re\n",1)[1].split('\nPY\n',1)[0]
+    code='import json,re\n'+code
+    config=tmp_path/'agent.json';value={'profiles':{'test':{'token':'keep-token','lego':{'path':path}} if path else {'token':'keep-token'}}}
+    config.write_text(json.dumps(value));before=config.read_bytes()
+    code=code.replace('/etc/haproxy-control/agent.json',str(config)).replace('/etc/systemd/system',str(tmp_path/'systemd'))
+    exec(compile(code,'update-acme','exec'),{})
+    text=(tmp_path/'systemd/haproxy-control-agent.service.d/99-management-acme.conf').read_text()
+    assert config.read_bytes()==before
+    assert text=='[Service]\n'+('ReadWritePaths=-'+path+'\n' if path else '')
+    assert 'ReadWritePaths=\n' not in text
+
+
+@pytest.mark.parametrize('path',['/etc/lego\nExecStart=other','/etc/lego/%u','/etc/lego/../secret'])
+def test_update_rejects_lego_unit_path_injection(tmp_path,path):
+    source=(ROOT/'scripts/install-agent.sh').read_text()
+    code='import json,re\n'+source.split(" - <<'PY'\nimport json,re\n",1)[1].split('\nPY\n',1)[0]
+    config=tmp_path/'agent.json';config.write_text(json.dumps({'profiles':{'test':{'lego':{'path':path}}}}))
+    code=code.replace('/etc/haproxy-control/agent.json',str(config)).replace('/etc/systemd/system',str(tmp_path/'systemd'))
+    with pytest.raises(SystemExit,match='Ungültiger LEGO-Pfad'):exec(compile(code,'update-acme','exec'),{})
+    assert not (tmp_path/'systemd').exists()

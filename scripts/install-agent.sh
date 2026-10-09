@@ -28,12 +28,23 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv curl certbot pyth
 curl -fsSL "${HAPROXY_SOURCE_URL%/}/api/agent-package" -o "$haproxy_install_temp/package.zip"
 printf '%s  %s\n' "$HAPROXY_PACKAGE_SHA256" "$haproxy_install_temp/package.zip" | sha256sum -c -
 install -d -m 755 "$haproxy_install_dir"
+# App-owned LEGO: reproducible version, no replacement of a user's global binary.
+case "$(uname -m)" in
+  x86_64) haproxy_lego_arch=amd64; haproxy_lego_sha=2a35505089e7772c92e1e9ac144df91151ef2eca8568630db0ff91fca06d9bef ;;
+  aarch64|arm64) haproxy_lego_arch=arm64; haproxy_lego_sha=15b14ec2ab14fde69cc8396eb0204c5ce4327e31a486953225a6059b26db3e8c ;;
+  *) echo 'LEGO-Installation unterstützt Linux amd64 und arm64.' >&2; exit 1 ;;
+esac
+curl -fsSL "https://github.com/go-acme/lego/releases/download/v5.5.2/lego_v5.5.2_linux_${haproxy_lego_arch}.tar.gz" -o "$haproxy_install_temp/lego.tar.gz"
+printf '%s  %s\n' "$haproxy_lego_sha" "$haproxy_install_temp/lego.tar.gz" | sha256sum -c -
+tar -xzf "$haproxy_install_temp/lego.tar.gz" -C "$haproxy_install_temp" lego
+install -d -m 755 "$haproxy_install_dir/bin"
+install -m 755 "$haproxy_install_temp/lego" "$haproxy_install_dir/bin/lego"
 python3 - "$haproxy_install_temp/package.zip" "$haproxy_install_dir" <<'PY'
 import sys
 from pathlib import Path
 from zipfile import ZipFile
 allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/haproxy_config.py',
-           'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/config_bundle.py', 'agent/config.example.json']
+           'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/challenge.py', 'agent/haproxy-control-webroot.service', 'agent/config_bundle.py', 'agent/config.example.json']
 with ZipFile(sys.argv[1]) as archive:
     for name in allowed:
         target = Path(sys.argv[2]) / name
@@ -44,6 +55,23 @@ PY
 python3 -m venv "$haproxy_install_dir/.venv"
 "$haproxy_install_dir/.venv/bin/pip" install -r "$haproxy_install_dir/requirements.txt"
 if [[ ${HAPROXY_AGENT_UPDATE_ONLY:-0} == 1 ]]; then
+  # Existing imported LEGO stores may live under systemd's read-only /etc.
+  PYTHONPATH="$haproxy_install_dir" "$haproxy_install_dir/.venv/bin/python" - <<'PY'
+import json,re
+from pathlib import Path
+from agent import main as agent
+conf=json.loads(Path('/etc/haproxy-control/agent.json').read_text())
+paths=set()
+for profile in conf['profiles'].values():
+    path=profile.get('lego',{}).get('path')
+    if path:
+        if not path.startswith('/') or '..' in path.split('/') or re.search(r'[\s%]',path):
+            raise SystemExit('Ungültiger LEGO-Pfad im Agent-Profil.')
+        paths.add(path)
+target=Path('/etc/systemd/system/haproxy-control-agent.service.d/99-management-acme.conf')
+agent.atomic(target,('[Service]\n'+('ReadWritePaths='+' '.join('-'+p for p in sorted(paths))+'\n' if paths else '')).encode(),0o644)
+PY
+  systemctl daemon-reload
   systemctl restart haproxy-control-agent
   systemctl is-active haproxy-control-agent
   echo 'Agent aktualisiert. Profile, Tokens und HAProxy-Konfigurationen wurden beibehalten. In der WebUI erneut einlesen.'
@@ -168,7 +196,7 @@ UMask=0077
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=-/etc/haproxy -/etc/letsencrypt
+ReadWritePaths=-/etc/haproxy -/etc/letsencrypt -/etc/lego
 [Install]
 WantedBy=multi-user.target
 '''
@@ -179,7 +207,7 @@ agent.atomic(target, unit.encode(), 0o644, 0, 0)
 override = Path('/etc/systemd/system/haproxy-control-agent.service.d/99-management-setup.conf')
 override.parent.mkdir(parents=True, exist_ok=True)
 agent.atomic(override, ('[Service]\nExecStart=\nExecStart=' + unit.split('ExecStart=', 1)[1].split('\n', 1)[0] + '\n').encode(), 0o644, 0, 0)
-print('Agent-Profil eingerichtet. Cloudflare-Zugangsdaten bei Bedarf in /etc/haproxy-control/cloudflare.ini hinterlegen (chmod 600).')
+print('Agent-Profil eingerichtet. Cloudflare- oder Hetzner-Token unter Zertifikate in der WebUI hinterlegen.')
 PY
 systemctl daemon-reload
 systemctl enable haproxy-control-agent
