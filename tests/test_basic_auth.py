@@ -147,6 +147,7 @@ def test_marker_corruption_and_userlist_collisions_are_rejected():
     ' http-request auth realm "Old team" if !{ http_auth(legacy) }',
     ' http-request auth realm "Old team" unless { http_auth(legacy) }',
     ' http-request auth if !{ http_auth(legacy) } or { path /locked }',
+    ' http-request auth if !{ http_auth(legacy) } or { hdr(X-Lock) -m str "a#b" } # keep this comment',
     ' http-request auth',
 ])
 def test_existing_backend_auth_requires_opt_in_and_survives_regeneration(challenge):
@@ -159,6 +160,7 @@ def test_existing_backend_auth_requires_opt_in_and_survives_regeneration(challen
     assert auth.strip_managed(config).count(challenge+'\n')==1
     assert auth.existing_rules(config)==auth.existing_rules(doc.imported_config)
     assert config.count(auth.PREFIX+'BEGIN legacy ')==1
+    if '"a#b"' in challenge:assert 'or { hdr(X-Lock) -m str "a#b" } # keep this comment' in config
     assert auth.read_metadata(config)['sites'][0]['replace_existing'] is True
     again=Document.model_validate(import_config(config,hashlib.sha256(config.encode()).hexdigest())['document'])
     selected=next(r for r in again.imported_routes if r.domain==route.domain)

@@ -139,7 +139,7 @@ def existing_rules(config):
 def legacy_challenge(line,skip,index):
     # Keep the original if/unless expression intact, including OR expressions.
     # Evaluate it at its original position and add the site gate separately.
-    match=re.match(r'''^(\s*http-request\s+auth(?:\s+realm\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#]+))?)(?:\s+(if|unless)\s+(.+?))?\s*(?:#.*)?$''',line.rstrip('\r\n'))
+    match=re.match(r'''^(\s*http-request\s+auth(?:\s+realm\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#]+))?)(?:\s+(if|unless)\s+(.+))?\s*(?:#.*)?$''',line.rstrip('\r\n'))
     if not match:raise ValueError('Die vorhandene Authentifizierungsregel kann nicht sicher umgestellt werden. Regel in der importierten Konfiguration prüfen und erneut einlesen.')
     action,operator,condition=match.groups();variable='txn.mgmt_legacy_'+hashlib.sha256((skip+str(index)).encode()).hexdigest()[:16]
     original=base64.b64encode(line.encode()).decode();block='legacy '+original

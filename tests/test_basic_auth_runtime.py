@@ -42,6 +42,7 @@ def port():
     'if !{ http_auth(legacy) }',
     'unless { http_auth(legacy) }',
     'if !{ http_auth(legacy) } or { path /locked }',
+    'if !{ http_auth(legacy) } or { path /locked } { hdr(X-Lock) -m str "a#b" } # keep comment',
 ])
 def test_legacy_migration_preserves_other_domains_and_frontends(tmp_path,kind,condition):
     web=http.server.ThreadingHTTPServer(('127.0.0.1',0),HTTP)
@@ -87,7 +88,7 @@ userlist legacy
             subprocess.run(['docker','run','-d','--name',container,'--user','0','--network','host','-v',str(tmp_path)+':/etc/haproxy','haproxy:3.2.25','haproxy','-W','-db','-f','/etc/haproxy/haproxy.cfg'],check=True,capture_output=True)
         with httpx.Client(trust_env=False,timeout=4) as client:
             def request(domain,path='/',credentials=None,listener=hp):
-                return client.get(f'http://127.0.0.1:{listener}'+path,headers={'Host':domain},auth=credentials)
+                return client.get(f'http://127.0.0.1:{listener}'+path,headers={'Host':domain,**({'X-Lock':'a#b'} if path=='/locked' else {})},auth=credentials)
             for _ in range(100):
                 try:
                     if request('private.example.com').status_code==401:break
