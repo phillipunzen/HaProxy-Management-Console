@@ -71,7 +71,7 @@ userlist legacy
 '''
     doc=Document.model_validate(import_config(original,hashlib.sha256(original.encode()).hexdigest())['document'])
     selected=next(r for r in doc.imported_routes if r.domain=='private.example.com')
-    selected.basic_auth_group=1;selected.basic_auth_replace_existing=True
+    selected.basic_auth_group=1;selected.basic_auth_replace_existing=True;selected.aliases=['private-alias.example.com']
     groups={1:{'id':1,'realm':'Central team','users':[{'username':'alice','hash':auth.hash_password(PASSWORD)}]}}
     current=generate(doc,{},groups)
     # Exercise the persisted/reimported form, as used after applying a draft.
@@ -95,6 +95,9 @@ userlist legacy
                 except httpx.RequestError:pass
                 time.sleep(.1)
             else:raise AssertionError('HAProxy did not start')
+            assert request('private-alias.example.com').status_code==401
+            assert request('private-alias.example.com',credentials=('old','old-password')).status_code==401
+            assert request('private-alias.example.com',credentials=('alice',PASSWORD)).status_code==200
             assert request('private.example.com',credentials=('old','old-password')).status_code==401
             assert request('private.example.com',credentials=('alice','wrong')).status_code==401
             for path in ('/','/locked','/double'):
@@ -135,7 +138,7 @@ def test_real_site_authentication_and_preservation(tmp_path,kind,source):
     backend=[{'address':'127.0.0.1','port':web.server_address[1]}]
     if source=='generated':
         doc=Document(http_port=hp,https_port=sp,tls_enabled=True,acme_enabled=True,acme_address='127.0.0.1',acme_port=web.server_address[1],hosts=[
-            Host(id='private',domain='private.example.com',servers=backend,basic_auth_group=1,force_https=True),
+            Host(id='private',domain='private.example.com',aliases=['private-alias.example.com','*.private.example.com'],servers=backend,basic_auth_group=1,force_https=True),
             Host(id='publicpath',domain='private.example.com',path='/public',servers=backend),
             Host(id='public',domain='public.example.com',servers=backend),
             Host(id='team',domain='team.example.com',servers=backend,basic_auth_group=2),
@@ -179,6 +182,7 @@ userlist legacy
 '''
         doc=Document.model_validate(import_config(config,hashlib.sha256(config.encode()).hexdigest())['document'])
         for route in doc.imported_routes:
+            if route.domain=='private.example.com':route.aliases=['private-alias.example.com']
             route.basic_auth_group={'private.example.com':1,'team.example.com':2,'forward.example.com':1,'empty.example.com':3}.get(route.domain)
             route.basic_auth_forward=route.domain=='forward.example.com'
     current=generate(doc,caps,groups);config_file=tmp_path/'haproxy.cfg';config_file.write_text(current)
@@ -206,6 +210,10 @@ userlist legacy
             assert request('private.example.com',credentials=('alice','incorrect')).status_code==401
             assert request('private.example.com',credentials=('bob',PASSWORD)).status_code==401
             assert request('private.example.com',credentials=('alice',PASSWORD)).json()['authorization'] is None
+            for alias in ['private-alias.example.com']+(['child.private.example.com'] if source=='generated' else []):
+                assert request(alias).status_code==401
+                assert request(alias,credentials=('alice','incorrect')).status_code==401
+                assert request(alias,credentials=('alice',PASSWORD)).json()['authorization'] is None
             assert request('team.example.com',credentials=('alice',PASSWORD)).status_code==401
             assert request('team.example.com',credentials=('bob',PASSWORD)).status_code==200
             assert request('forward.example.com',credentials=('alice',PASSWORD)).json()['authorization'].startswith('Basic ')

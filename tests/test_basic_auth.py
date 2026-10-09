@@ -312,3 +312,27 @@ def test_api_short_password_creation_change_and_blank_update(api):
     retained=client.put('/api/basic-auth/users/'+str(user['id']),json={**changed.json(),'password':''});assert retained.status_code==200,retained.text
     with factory() as db:assert db.get(BasicAuthUser,user['id']).password_hash==updated
     assert client.post('/api/basic-auth/users',json={'username':'missing','password':None}).status_code==422
+
+
+def test_host_aliases_share_single_challenge_and_header_removal():
+    doc=protected_doc();doc.hosts[0].aliases=['alias.example.com','*.private.example.com']
+    config=generate(doc,CAP,{1:group()})
+    assert config.count('http-request auth realm')==1
+    assert config.count('http-request del-header Authorization')==1
+    assert {site['domain'] for site in auth.read_metadata(config)['sites']}==set(doc.hosts[0].hostnames)
+
+
+def test_imported_aliases_roundtrip_auth_and_different_policies_stay_separate():
+    doc=imported_doc();route=doc.imported_routes[0];route.aliases=['alias.example.com'];route.basic_auth_group=1
+    config=generate(doc,CAP,{1:group()})
+    assert '{ hdr(host) -i alias.example.com }' in config
+    again=Document.model_validate(import_config(config,hashlib.sha256(config.encode()).hexdigest())['document'])
+    assert again.imported_routes[0].hostnames==route.hostnames
+    assert again.imported_routes[0].basic_auth_group==1
+    # A manually combined ACL must not merge access rights on the next import.
+    combined=config.replace('private.example.com alias.example.com','private.example.com public.example.com alias.example.com').replace(' acl mgmt_'+doc.imported_routes[1].id+' hdr(host) -i public.example.com\n use_backend shared if mgmt_'+doc.imported_routes[1].id+'\n','')
+    from backend.haproxy_config import map_routes
+    _,routes,_=map_routes(combined,[])
+    private=next(r for r in routes if r.domain=='private.example.com')
+    assert private.aliases==['alias.example.com']
+    assert next(r for r in routes if r.domain=='public.example.com').aliases==[]

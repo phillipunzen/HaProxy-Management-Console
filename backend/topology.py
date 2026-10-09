@@ -36,11 +36,14 @@ def acl_sites(tokens):
     if not re.fullmatch(r'(?:req\.)?hdr(?:_end)?\(host\)(?:,field\(1,:\))?',fetch):return []
     # Only plain literal host matches; -f, regexes and negated matches remain rules.
     values=tokens[3:]
+    suffix=fetch.startswith(('hdr_end','req.hdr_end'))
+    if values[:2]==['-m','end']:
+        suffix=True;values=values[2:]
     if not values or values[0]!='-i' or any(v.startswith('-') for v in values[1:]):return []
     result=[]
     for value in values[1:]:
         value=value.lower()
-        if fetch.startswith(('hdr_end','req.hdr_end')) and value.startswith('.'):value='*'+value
+        if suffix and value.startswith('.'):value='*'+value
         if not DOMAIN.fullmatch(value):return []
         result.append(value)
     return result
@@ -104,7 +107,9 @@ def build(config, maps, data):
 
     for s in sections:
         if s.kind not in ('frontend','listen'):continue
-        acls={t[1]:t for _,t in s.lines if t[0]=='acl' and len(t)>2}
+        acls={}
+        for _,t in s.lines:
+            if t[0]=='acl' and len(t)>2:acls.setdefault(t[1],[]).append(t)
         count=0
         for index,t in s.lines:
             if t[0] not in ('use_backend','default_backend') or len(t)<2:continue
@@ -136,12 +141,15 @@ def build(config, maps, data):
             domains=[];path=''
             if len(t)>3 and t[2]=='if' and all(token in acls for token in t[3:]):
                 # Multiple host ACLs joined with AND can be ambiguous; keep them a rule.
-                groups=[acl_sites(acls[token]) for token in t[3:]]
+                groups=[]
+                for token in t[3:]:
+                    matches=[acl_sites(acl) for acl in acls[token]]
+                    groups.append(list(dict.fromkeys(name for values in matches for name in values)) if all(matches) else [])
                 groups=[g for g in groups if g]
                 if len(groups)==1:domains=groups[0]
                 for token in t[3:]:
-                    acl=acls[token]
-                    if len(acl)==4 and acl[2]=='path_beg':path=acl[3]
+                    values=acls[token]
+                    if len(values)==1 and len(values[0])==4 and values[0][2]=='path_beg':path=values[0][3]
             if domains:
                 for domain in domains:route(s,index,domain+(path if path and path!='/' else ''),target,condition,domain,path)
             else:route(s,index,'Standardroute' if t[0]=='default_backend' else target,target,condition,default=t[0]=='default_backend')

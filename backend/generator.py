@@ -3,6 +3,16 @@ from backend.schemas import Document
 def address(host, port):
     return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
 
+def host_acl(host):
+    result=[]
+    exact=[name for name in host.hostnames if not name.startswith('*.')]
+    wildcard=[name[1:] for name in host.hostnames if name.startswith('*.')]
+    if exact:result.append(f'    acl host_{host.id} hdr(host),field(1,:) -i '+ ' '.join(exact))
+    if wildcard:result.append(f'    acl host_{host.id} hdr(host),field(1,:) -m end -i '+ ' '.join(wildcard))
+    return result
+
+def host_order(host):return (-len(host.path),any(name.startswith('*.') for name in host.hostnames))
+
 def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.basic_auth import inject
     from backend.managed_proxy import enhance
@@ -36,11 +46,9 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         else:
             name,value = rule.target.split(':',1)
             out += [f'    http-request set-header {name} {value.strip()} if {condition}']
-    hosts = sorted((h for h in doc.hosts if h.enabled and h.frontend=='public_http'), key=lambda h: (-len(h.path), h.domain.startswith('*.')))
+    hosts = sorted((h for h in doc.hosts if h.enabled and h.frontend=='public_http'), key=host_order)
     for host in hosts:
-        matcher = 'hdr_end(host),field(1,:) -i' if host.domain.startswith('*.') else 'hdr(host),field(1,:) -i'
-        domain = host.domain[1:] if host.domain.startswith('*.') else host.domain
-        out += [f'    acl host_{host.id} {matcher} {domain}', f'    acl path_{host.id} path_beg {host.path}']
+        out += host_acl(host)+[f'    acl path_{host.id} path_beg {host.path}']
         if host.force_https:
             out += [f'    http-request redirect scheme https code 301 if host_{host.id} path_{host.id} !{{ ssl_fc }}' + (' !acme_challenge' if doc.acme_enabled else '')]
     if doc.acme_enabled:

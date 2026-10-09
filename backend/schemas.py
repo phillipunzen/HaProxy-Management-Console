@@ -143,6 +143,7 @@ class BackendServer(BaseModel):
 class Host(BaseModel):
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,40}$')
     domain: str = Field(max_length=253)
+    aliases: list[str] = Field(default_factory=list,max_length=29)
     path: str = Field(default='/', max_length=300)
     enabled: bool = True
     force_https: bool = False
@@ -157,9 +158,21 @@ class Host(BaseModel):
     @classmethod
     def domain_ok(cls, v):
         v = v.lower().strip()
-        if not DOMAIN.fullmatch(v):
+        if len(v)>253 or not DOMAIN.fullmatch(v):
             raise ValueError('Bitte einen gültigen Domainnamen eingeben.')
         return v
+
+    @field_validator('aliases')
+    @classmethod
+    def aliases_ok(cls,values):return [cls.domain_ok(value) for value in values]
+
+    @model_validator(mode='after')
+    def unique_hostnames(self):
+        if len(set(self.hostnames))!=len(self.hostnames):raise ValueError('Hostnamen müssen innerhalb eines Eintrags eindeutig sein.')
+        return self
+
+    @property
+    def hostnames(self):return [self.domain]+self.aliases
 
     @field_validator('path')
     @classmethod
@@ -217,6 +230,7 @@ class ImportedRoute(BaseModel):
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     frontend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     domain: str = Field(max_length=253)
+    aliases: list[str] = Field(default_factory=list,max_length=29)
     backend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     basic_auth_group: int | None = Field(default=None,ge=1)
     basic_auth_forward: bool = False
@@ -229,6 +243,18 @@ class ImportedRoute(BaseModel):
         value=Host.domain_ok(value)
         if value.startswith('*.'):raise ValueError('Host-Maps verwenden hier exakte Domains, keine Wildcards.')
         return value
+
+    @field_validator('aliases')
+    @classmethod
+    def aliases_ok(cls,values):return [cls.valid_domain(value) for value in values]
+
+    @model_validator(mode='after')
+    def unique_hostnames(self):
+        if len(set(self.hostnames))!=len(self.hostnames):raise ValueError('Hostnamen müssen innerhalb eines Eintrags eindeutig sein.')
+        return self
+
+    @property
+    def hostnames(self):return [self.domain]+self.aliases
 
 class ImportedMap(BaseModel):
     path: str = Field(max_length=1000)
@@ -310,7 +336,8 @@ class Document(BaseModel):
         for b in self.imported_backends:
             if len({s.name for s in b.servers})!=len(b.servers):
                 raise ValueError('Übernommene Servernamen müssen eindeutig sein.')
-        if len({(r.frontend,r.domain) for r in self.imported_routes})!=len(self.imported_routes):
+        imported_names=[(r.frontend,name) for r in self.imported_routes for name in r.hostnames]
+        if len(set(imported_names))!=len(imported_names):
             raise ValueError('Domains müssen pro Frontend eindeutig sein.')
         for items in (self.imported_sources,self.imported_map_hashes,self.imported_maps):
             if len({s.path for s in items})!=len(items):raise ValueError('Dateipfade müssen eindeutig sein.')
@@ -329,7 +356,8 @@ class Document(BaseModel):
             existing={s.name for s in parse_sections(self.imported_config)[1] if s.kind in ('frontend','backend','listen')}
         else:existing={'public_http','unknown_host','acme_webroot'}
         if existing&set(names):raise ValueError('Proxy-Name existiert bereits: '+', '.join(sorted(existing&set(names))))
-        routes=[(h.frontend,h.domain,h.path) for h in self.hosts if h.enabled]+[(r.frontend,r.domain,'/') for r in self.imported_routes]
+        routes=[(h.frontend,name,h.path) for h in self.hosts if h.enabled for name in h.hostnames]+[(r.frontend,name,'/') for r in self.imported_routes for name in r.hostnames]
+        if sum(len(h.hostnames) for h in self.hosts)+len(imported_names)>2200:raise ValueError('Maximal 2200 Hostnamen pro Server werden unterstützt.')
         if len(set(routes))!=len(routes):raise ValueError('Domain und Pfad dürfen pro Frontend nur einmal zugewiesen sein.')
         for frontend,names in self.frontend_certificates.items():
             if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',frontend) or len(names)>100 or len(set(names))!=len(names) or any(not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',name) for name in names):

@@ -522,8 +522,9 @@ def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
             if assigned-certs.keys():raise ValueError('Zugewiesene Produktionszertifikate fehlen oder sind abgelaufen: '+', '.join(sorted(assigned-certs.keys())))
             for site in [h for h in doc.hosts if h.enabled]+doc.imported_routes:
                 if not site.certificate:continue
-                covered=any(site.domain==d or (d.startswith('*.') and not site.domain.startswith('*.') and site.domain.count('.')==d.count('.') and site.domain.endswith(d[1:])) for d in certs[site.certificate].get('domains',[]))
-                if not covered:raise ValueError('Zertifikat '+site.certificate+' deckt '+site.domain+' nicht ab.')
+                for name in site.hostnames:
+                    covered=any(name==d or (d.startswith('*.') and not name.startswith('*.') and name.count('.')==d.count('.') and name.endswith(d[1:])) for d in certs[site.certificate].get('domains',[]))
+                    if not covered:raise ValueError('Zertifikat '+site.certificate+' deckt '+name+' nicht ab.')
         if len(config.encode())>1024*1024:raise ValueError('Erzeugte Konfiguration mit Basic-Auth-Benutzern ist größer als 1 MB.')
     except ValueError as e: raise HTTPException(422,str(e))
     return {'config':config,'base_hash':current['hash'],'document_version':i.document_version}

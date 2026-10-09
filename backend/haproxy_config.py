@@ -28,6 +28,23 @@ def map_references(config):
 def map_routes(config,maps):
     lines,sections=parse_sections(config); rules=[]; routes=[]; warnings=[]
     values={m['path']:m['content'] for m in maps}
+    preferences=None
+    def alias_groups(frontend,backend,names):
+        nonlocal preferences
+        if preferences is None:
+            from backend.basic_auth import read_metadata
+            from backend.tls_bindings import read
+            auth=read_metadata(config) or {};preferences={}
+            for site in auth.get('sites',[]):
+                if site['kind']=='route':preferences[(site['frontend'],site['backend'],site['domain'])]=(site['group'],site['forward'],site.get('replace_existing',False))
+            tls={(p['frontend'],s['domain']):s['certificate'] for p in read(config) for s in p['sites']}
+            preferences=(preferences,tls)
+        auth,tls=preferences;groups={}
+        for name in names:
+            key=(auth.get((frontend,backend,name)),tls.get((frontend,name)))
+            groups.setdefault(key,[]).append(name)
+        # Differently protected/certified names stay separate on reimport.
+        return [values[offset:offset+30] for values in groups.values() for offset in range(0,len(values),30)]
     for section in sections:
         if section.kind not in ('frontend','listen'):continue
         for index,tokens in section.lines:
@@ -55,24 +72,27 @@ def map_routes(config,maps):
         # in place. Complex conditions and ACLs used elsewhere remain untouched.
         pairs=[]
         for position,(index,t) in enumerate(section.lines[:-1]):
-            if len(t)!=5 or t[0]!='acl' or t[2] not in ('hdr(host)','req.hdr(host)') or t[3]!='-i':continue
-            domain=t[4]
+            if len(t)<5 or t[0]!='acl' or t[2] not in ('hdr(host)','req.hdr(host)') or t[3]!='-i':continue
+            domains=[name.lower() for name in t[4:]]
             next_index,next_tokens=section.lines[position+1]
             if len(next_tokens)!=4 or next_tokens[0]!='use_backend' or next_tokens[2:]!=['if',t[1]]:continue
-            if not DOMAIN.fullmatch(domain.lower()) or domain.startswith('*.'):continue
+            if any(len(name)>253 or not DOMAIN.fullmatch(name) or name.startswith('*.') for name in domains) or len(set(domains))!=len(domains):continue
             if not re.fullmatch(r'[a-zA-Z0-9_.-]+',next_tokens[1]):continue
             # Do not remove ACLs that are referenced by other rules.
             if sum(tokens.count(t[1]) for _,tokens in section.lines)!=2:continue
-            pairs.append((index,next_index,domain.lower(),next_tokens[1]))
+            pairs.append((index,next_index,domains,next_tokens[1]))
         if not pairs:continue
         indexes={i for pair in pairs for i in pair[:2]}
         low,high=min(indexes),max(indexes)
         if any(low<=i<=high and i not in indexes for i,_ in section.lines):
             warnings.append(f'{section.name}: Verschachtelte Host-ACLs bleiben im Texteditor.');continue
-        if len({pair[2] for pair in pairs})!=len(pairs):continue
+        domains=[name for pair in pairs for name in pair[2]]
+        if len(set(domains))!=len(domains):continue
         rules.append({'index':low,'indexes':sorted(indexes),'frontend':section.name,'path':None,'default':None})
-        routes += [ImportedRoute(id='acl_'+hashlib.sha256(f'{section.name}:{domain}'.encode()).hexdigest()[:16],
-                   frontend=section.name,domain=domain,backend=backend) for _,_,domain,backend in pairs]
+        for _,_,names,backend in pairs:
+            groups=alias_groups(section.name,backend,names) if len(names)>1 else [names]
+            routes += [ImportedRoute(id='acl_'+hashlib.sha256(f'{section.name}:{names[0]}'.encode()).hexdigest()[:16],
+                       frontend=section.name,domain=names[0],aliases=names[1:],backend=backend) for names in groups]
     return rules,routes,warnings
 
 HEADERS = {'global','defaults','frontend','backend','listen','resolvers','peers','userlist',
@@ -159,9 +179,9 @@ def enrich_stats(data, config=None, maps=None):
         for proxy in proxies:
             active=[rule for rule in rules if rule['frontend']==proxy['name']]
             if active:
-                proxy['routes']=[{'backend':route.backend,'domain':route.domain,'default':False} for route in routes if route.frontend==proxy['name']]
+                proxy['routes']=[{'backend':route.backend,'domain':name,'default':False} for route in routes if route.frontend==proxy['name'] for name in route.hostnames]
                 proxy['routes'] += [{'backend':rule['default'],'default':True} for rule in active if rule['default']]
-                proxy['domains']=[route.domain for route in routes if route.frontend==proxy['name']]
+                proxy['domains']=[name for route in routes if route.frontend==proxy['name'] for name in route.hostnames]
     front={p['name']:p for p in proxies if p['kind'] in ('frontend','listen')}
     back={p['name']:p for p in proxies if p['kind'] in ('backend','listen')}
     rows=[]
@@ -280,7 +300,8 @@ def generate_imported(doc):
         raise ValueError('Domain-Routen müssen einen eingelesenen Frontend- und Backend-Namen verwenden.')
     for rule in rules:
         routes=[r for r in doc.imported_routes if r.frontend==rule['frontend']]
-        if len({r.domain for r in routes})!=len(routes):raise ValueError('Doppelte Domain im selben Frontend.')
+        names=[name for r in routes for name in r.hostnames]
+        if len(set(names))!=len(names):raise ValueError('Doppelte Domain im selben Frontend.')
         index=rule['index'];ending='\r\n' if lines[index].endswith('\r\n') else '\n'
         indent=re.match(r'\s*',lines[index])[0]
         entries=[]
@@ -288,7 +309,7 @@ def generate_imported(doc):
             acl='mgmt_'+route.id
             if any(i not in rule.get('indexes',[]) and re.search(r'\bacl\s+'+re.escape(acl)+r'\b',line) for i,line in enumerate(lines)):
                 raise ValueError('ACL-Namenskonflikt; Domain-ID ändern.')
-            entries += [indent+f'acl {acl} hdr(host) -i {route.domain}',indent+f'use_backend {route.backend} if {acl}']
+            entries += [indent+f'acl {acl} hdr(host) -i '+ ' '.join(route.hostnames),indent+f'use_backend {route.backend} if {acl}']
         if rule['default']:entries.append(indent+'use_backend '+rule['default'])
         patch[index]=ending.join(entries)+ending
         for other in rule.get('indexes',[]):

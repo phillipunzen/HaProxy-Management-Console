@@ -144,3 +144,23 @@ def test_manual_binding_changes_and_invalid_metadata_are_rejected(setup):
     _,_,config,_=setup
     with pytest.raises(ValueError,match='manuell'):tls.restore(config.replace('alpn h2,http/1.1','alpn http/1.1'))
     with pytest.raises(ValueError,match='metadaten'):tls.read(tls.PREFIX+'bad!')
+
+
+def test_imported_alias_certificate_survives_reimport_and_removed_alias_is_cleared(setup):
+    p,doc,_,_=setup;doc.imported_routes[0].aliases=['alias.example.com']
+    config=generate(doc,{'cert_dir_config':p['cert_dir_config']})
+    assert {s['domain'] for s in tls.read(config)[0]['sites']}=={'app.example.com','alias.example.com'}
+    again=Document.model_validate(import_config(config,hashlib.sha256(config.encode()).hexdigest())['document'])
+    assert again.imported_routes[0].aliases==['alias.example.com'] and again.imported_routes[0].certificate=='chosen'
+    again.imported_routes[0].aliases=[]
+    updated=generate(again,{'cert_dir_config':p['cert_dir_config']})
+    assert tls.read(updated)[0]['sites']==[{'domain':'app.example.com','certificate':'chosen'}]
+    assert 'alias.example.com' not in files.content(p,tls.read(updated)[0]).decode()
+
+
+def test_alias_certificate_must_cover_every_name_before_materialization(setup):
+    p,doc,_,_=setup;doc.imported_routes[0].aliases=['outside.example.net']
+    config=generate(doc,{'cert_dir_config':p['cert_dir_config']})
+    with pytest.raises(HTTPException,match='outside.example.net'):
+        with files.materialize(p,config,agent.atomic):pass
+    assert not (Path(p['cert_dir'])/'.control-tls').exists()

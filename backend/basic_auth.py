@@ -46,16 +46,16 @@ def hash_password(password):
 
 
 def bindings(doc):
-    result=[{'kind':'host','frontend':h.frontend,'backend':'backend_'+h.id,'domain':h.domain,'path':h.path,'group':h.basic_auth_group,'forward':h.basic_auth_forward} for h in doc.hosts if h.enabled and h.basic_auth_group]
-    result += [{'kind':'route','domain':r.domain,'path':'/','frontend':r.frontend,'backend':r.backend,'group':r.basic_auth_group,'forward':r.basic_auth_forward,**({'replace_existing':True} if r.basic_auth_replace_existing else {})} for r in doc.imported_routes if r.basic_auth_group]
+    result=[{'kind':'host','frontend':h.frontend,'backend':'backend_'+h.id,'domain':name,'path':h.path,'group':h.basic_auth_group,'forward':h.basic_auth_forward} for h in doc.hosts if h.enabled and h.basic_auth_group for name in h.hostnames]
+    result += [{'kind':'route','domain':name,'path':'/','frontend':r.frontend,'backend':r.backend,'group':r.basic_auth_group,'forward':r.basic_auth_forward,**({'replace_existing':True} if r.basic_auth_replace_existing else {})} for r in doc.imported_routes if r.basic_auth_group for name in r.hostnames]
     if doc.imported_config:
         old=read_metadata(doc.imported_config)
         if old:
             _,editable,_=map_routes(doc.imported_config,[m.model_dump() for m in doc.imported_maps])
-            editable={(r.frontend,r.domain) for r in editable}
+            editable={(r.frontend,name) for r in editable for name in r.hostnames}
             # Uneditable pre-existing managed sites remain protected, including
             # native path hosts that the conservative import cannot yet edit.
-            result += [s for s in old['sites'] if (s['kind']!='route' or (s['frontend'],s['domain']) not in editable) and not any(h.frontend==s['frontend'] and h.domain==s['domain'] and h.path==s['path'] for h in doc.hosts)]
+            result += [s for s in old['sites'] if (s['kind']!='route' or (s['frontend'],s['domain']) not in editable) and not any(h.frontend==s['frontend'] and s['domain'] in h.hostnames and h.path==s['path'] for h in doc.hosts)]
     return result
 
 
@@ -160,7 +160,9 @@ def inject(config,doc,groups=None):
         if site['frontend'] not in fronts or fronts[site['frontend']].mode!='http':raise ValueError('Basic Auth benötigt ein HTTP-Frontend; TCP-Passthrough kann nicht geschützt werden.')
         if any(t[:2]==['http-request','auth'] for _,t in fronts[site['frontend']].lines):raise ValueError('Im Frontend '+site['frontend']+' besteht bereits eine eigene Authentifizierungsregel. Diese in der ursprünglichen Konfiguration abstimmen und erneut einlesen; die Umstellung im Domain-Dialog gilt für Backend-Regeln.')
         condition=f"{{ fe_name -m str {site['frontend']} }} {{ hdr(host) -i {site['domain']} }}" if site['kind']=='route' else ''
-        rules.setdefault(site['backend'],[]).append((site['group'],condition,site['forward'],site.get('replace_existing',False)))
+        entry=(site['group'],condition,site['forward'],site.get('replace_existing',False))
+        entries=rules.setdefault(site['backend'],[])
+        if entry not in entries:entries.append(entry)
     userlists={s.name for s in sections if s.kind=='userlist'}
     output=[PREFIX+'BEGIN users']
     for id in sorted(required):
@@ -215,7 +217,8 @@ def assignments(db,lock=False):
     for i in db.scalars(query):
         for key in ('hosts','imported_routes'):
             for h in i.document.get(key,[]):
-                if h.get('basic_auth_group'):result.append({'group_id':h['basic_auth_group'],'instance_id':i.id,'instance_name':i.name,'domain':h['domain'],'path':h.get('path','/'),'enabled':h.get('enabled',True)})
+                if h.get('basic_auth_group'):
+                    result += [{'group_id':h['basic_auth_group'],'instance_id':i.id,'instance_name':i.name,'domain':name,'path':h.get('path','/'),'enabled':h.get('enabled',True)} for name in [h['domain']]+h.get('aliases',[])]
         try:
             doc=Document.model_validate(i.document)
             for s in bindings(doc):

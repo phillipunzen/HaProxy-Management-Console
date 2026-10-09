@@ -160,3 +160,13 @@ def test_topology_endpoint_is_read_only_viewer_accessible_and_config_cache_bound
         assert client.get(f'/api/instances/{id}/topology').status_code==200 and len(main.topology_cache)<=128
         assert client.get('/api/instances/9999/topology').status_code==404
     finally:main.app.dependency_overrides.clear();engine.dispose()
+
+
+def test_exact_and_wildcard_aliases_are_all_visible_in_shared_backend_topology():
+    from backend.schemas import Host
+    doc=Document(hosts=[Host(id='wiki',domain='pc-wiki.de',aliases=['www.pc-wiki.de','*.wiki.example.com'],servers=[{'address':'192.0.2.1'}])])
+    g=graph(generate(doc,{'runtime_socket_config':'/run/admin.sock','cert_dir_config':'/etc/certs'}),[])
+    sites=[n for n in nodes(g,'route') if n.get('domain')]
+    assert {n['domain'] for n in sites}==set(doc.hosts[0].hostnames)
+    assert {targets(g,n)[0]['name'] for n in sites}=={'backend_wiki'}
+    assert all(n['metrics']=={} for n in sites)

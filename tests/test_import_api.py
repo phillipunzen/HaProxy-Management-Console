@@ -228,7 +228,7 @@ def sync_api(api,monkeypatch):
         if not path:return state['cap']
         if path=='/config':return {'config':state['active'],'hash':sha(state['active'])}
         if path=='/config-bundle':return current_bundle()
-        if path=='/certificates':return [{'name':'site','staging':False,'days_remaining':60,'domains':['app.example.com','new.example.com']}]
+        if path=='/certificates':return [{'name':'site','staging':False,'days_remaining':60,'domains':['app.example.com','new.example.com','www.example.com','www.new.example.com']}]
         if path=='/validate':return {'valid':True}
         if path=='/apply':
             if state['fail']:raise HTTPException(422,'Konfiguration ungültig.')
@@ -257,8 +257,8 @@ def apply_generated(c):
 def test_repeated_apply_keeps_graphical_hosts_auth_tls_and_updates_all_hashes(sync_api,kind):
     c,factory,state=sync_api;state['cap']['kind']=kind
     doc=c.get('/api/instances/1/document').json()
-    doc['imported_routes'][0].update(certificate='site',basic_auth_group=1)
-    doc['hosts']=[{'id':'newsite','frontend':'incoming','domain':'new.example.com','certificate':'site','basic_auth_group':1,'servers':[{'address':'192.0.2.30','port':8080}]}]
+    doc['imported_routes'][0].update(certificate='site',basic_auth_group=1,aliases=['www.example.com'])
+    doc['hosts']=[{'aliases':['www.new.example.com'],'id':'newsite','frontend':'incoming','domain':'new.example.com','certificate':'site','basic_auth_group':1,'servers':[{'address':'192.0.2.30','port':8080}]}]
     doc['backends']=[{'name':'new_db','mode':'tcp','servers':[{'address':'192.0.2.31','port':3306}]}]
     doc['frontends']=[{'name':'new_tcp','mode':'tcp','port':3307,'backend':'new_db'}]
     saved=c.put('/api/instances/1/document',json=doc);assert saved.status_code==200,saved.text
@@ -369,3 +369,12 @@ def test_old_base_recovery_does_not_adopt_external_secondary_edits(sync_api):
     state['extra']+='\n# external change\n'
     after=c.get('/api/instances/1/document').json();assert after==before
     assert c.post('/api/instances/1/generate',json={}).status_code==409
+
+
+def test_management_rejects_selected_certificate_missing_alias(sync_api):
+    c,_,_=sync_api;doc=c.get('/api/instances/1/document').json()
+    doc['imported_routes'][0].update(certificate='site',aliases=['not-covered.example.net'])
+    result=c.put('/api/instances/1/document',json=doc)
+    assert result.status_code==200,result.text
+    result=c.post('/api/instances/1/generate',json={})
+    assert result.status_code==422 and 'not-covered.example.net' in result.text

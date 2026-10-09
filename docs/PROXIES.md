@@ -8,6 +8,14 @@ Unter **Proxy Hosts → Proxy Host** Domain, optionalen Pfad und Zielserver eint
 
 Optional eine zentrale Basic-Auth-Gruppe und ein Zertifikat wählen. Beim gemeinsamen Listener eines neuen Entwurfs aktiviert die Zertifikatsauswahl HTTPS. Bei bestehenden oder selbst angelegten Frontends muss TLS am Frontend eingerichtet sein. Die Konfiguration bleibt ein Entwurf bis zum Anwenden.
 
+## Mehrere Hostnamen für einen Reverseproxy
+
+Im Host-Dialog die Hauptdomain unter **Domain** und weitere Namen unter **Weitere Hostnamen** eintragen, pro Zeile einen Namen oder mit Komma getrennt. Beispiel: `pc-wiki.de` als Domain und `www.pc-wiki.de` als weiterer Hostname. Bis zu 30 Namen insgesamt teilen sich einen Backend-Pool, Pfad, HTTPS-Redirect, Basic-Auth-Gruppe und Zertifikatsauswahl. Beide Namen liefern dieselbe Website; die Domain wird dadurch nicht automatisch auf den anderen Namen umgeleitet.
+
+Das Feld gibt es auch beim Bearbeiten einer **übernommenen Domain-Zuordnung**. Normale Proxy Hosts unterstützen zusätzlich Wildcards; übernommene Domain-Zuordnungen verwenden exakte Namen. Doppelte Namen für denselben Pfad und dasselbe Frontend werden abgelehnt. In der Übersicht lassen sich zusätzliche Namen aufklappen; die Suche nach normalen Proxy Hosts berücksichtigt sie ebenfalls.
+
+Das ausgewählte Produktionszertifikat muss alle Namen abdecken. Bei der Zertifikatsanforderung schlägt **Umfang → Alle Sites dieses Servers gemeinsam** auch zusätzliche Namen vor. DNS-Einträge für jeden Namen müssen auf den HAProxy zeigen. Bei bereits separat importierten Einträgen zuerst die zusätzliche Domain-Zuordnung entfernen und den Namen am gemeinsamen Eintrag hinterlegen; unterschiedliche Zugangsregeln oder Zertifikate bleiben beim Import als getrennte Einträge erhalten.
+
 ## Änderungen anwenden
 
 Unter **Proxy Hosts**, **Frontends & Backends** und **Regeln** führt **Prüfen & anwenden** nach Bestätigung den ganzen Ablauf für den angezeigten Server aus: Konfiguration erzeugen, HAProxy-Prüfung, Version und vorherige Konfiguration sichern, anwenden und Reload bestätigen. Die Ansicht wird anschließend automatisch aktualisiert. Zum vorherigen Vergleich weiterhin **Konfiguration erzeugen** verwenden und im Konfigurationseditor prüfen und anwenden.

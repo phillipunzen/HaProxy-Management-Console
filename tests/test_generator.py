@@ -123,3 +123,33 @@ def test_imported_names_and_duplicate_site_routes_are_rejected():
 def test_existing_crt_list_is_not_silently_discarded():
     doc=imported_with_tls();doc.imported_config=doc.imported_config.replace('crt /etc/haproxy/certs/cert.pem','crt-list /etc/haproxy/crt-list.txt');doc.frontend_certificates={'fe_https':['app-cert']}
     with pytest.raises(ValueError,match='crt-list'):generate(doc,CAP)
+
+
+@pytest.mark.parametrize('frontend',['public_http','fe_apps','fe_https'])
+def test_multiple_names_route_once_to_one_pool(frontend):
+    doc=imported_with_tls() if frontend=='fe_https' else Document()
+    if frontend=='fe_apps':doc.frontends=[ManagedFrontend(name=frontend,port=8081)]
+    doc.hosts=[host(frontend=frontend,aliases=['WWW.EXAMPLE.COM','*.alternate.example.com'],path='/wiki')]
+    config=generate(doc,CAP)
+    assert 'acl host_app hdr(host),field(1,:) -i app.example.com www.example.com' in config
+    assert 'acl host_app hdr(host),field(1,:) -m end -i .alternate.example.com' in config
+    assert config.count('use_backend backend_app if host_app path_app')==1
+    assert config.splitlines().count('backend backend_app')==1
+    assert 'acl path_app path_beg /wiki' in config
+
+@pytest.mark.parametrize('aliases',[
+    ['APP.EXAMPLE.COM'],['www.example.com','WWW.EXAMPLE.COM'],['bad\nhttp-request deny'],
+    ['x'*254+'.com'],['https://www.example.com'],['www.example.com:443'],['a.example.com']*30])
+def test_invalid_aliases_are_rejected(aliases):
+    with pytest.raises(ValidationError):host(aliases=aliases)
+
+
+def test_alias_collisions_include_imported_routes_but_allow_other_paths_and_frontends():
+    from backend.schemas import ImportedRoute
+    base=host(aliases=['www.example.com'])
+    with pytest.raises(ValidationError,match='einmal'):
+        Document(hosts=[base,Host(id='second',domain='www.example.com',servers=[{'address':'192.0.2.1'}])])
+    with pytest.raises(ValidationError,match='einmal'):
+        Document(hosts=[base],imported_routes=[ImportedRoute(id='r',frontend='public_http',domain='www.example.com',backend='existing')])
+    assert Document(hosts=[base,Host(id='path',domain='www.example.com',path='/admin',servers=[{'address':'192.0.2.1'}]),Host(id='other',frontend='other',domain='www.example.com',servers=[{'address':'192.0.2.1'}])])
+    assert host().aliases==[]

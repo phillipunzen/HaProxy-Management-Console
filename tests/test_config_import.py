@@ -280,3 +280,28 @@ def test_empty_map_can_accept_first_domain_and_unused_acl_is_preserved():
     original='defaults\n mode http\nfrontend f\n bind :80\n acl app hdr(host) -i app.example.com\n http-request deny if app\n use_backend be_app if app\n'+EXTRA
     assert not doc(original).imported_routes
     assert generate(doc(original),{})==original
+
+
+def test_multi_name_acl_imports_and_roundtrips_as_one_editable_route():
+    original='defaults\n mode http\nfrontend incoming\n bind :80\n acl wiki hdr(host) -i pc-wiki.de www.pc-wiki.de\n use_backend be_app if wiki\n'+EXTRA
+    document=doc(original)
+    assert len(document.imported_routes)==1
+    assert document.imported_routes[0].hostnames==['pc-wiki.de','www.pc-wiki.de']
+    again=doc(generate(document,{}))
+    assert again.imported_routes[0].hostnames==['pc-wiki.de','www.pc-wiki.de']
+    assert again.imported_routes[0].backend=='be_app'
+
+
+def test_multi_name_import_does_not_merge_differently_certified_domains():
+    from backend import tls_bindings
+    from backend.schemas import ImportedRoute
+    original='defaults\n mode http\nfrontend incoming\n bind :443 ssl crt /etc/certs/default.pem\n acl wiki hdr(host) -i pc-wiki.de www.pc-wiki.de\n use_backend be_app if wiki\n'+EXTRA
+    document=doc(original)
+    document.imported_routes=[ImportedRoute(id='one',frontend='incoming',domain='pc-wiki.de',backend='be_app',certificate='one'),ImportedRoute(id='two',frontend='incoming',domain='www.pc-wiki.de',backend='be_app',certificate='two')]
+    generated=generate(document,{'cert_dir_config':'/etc/certs'})
+    # Restore one source ACL while retaining independent certificate metadata.
+    import re
+    generated=re.sub(r' acl mgmt_one[^\n]+\n use_backend be_app if mgmt_one\n acl mgmt_two[^\n]+\n use_backend be_app if mgmt_two', ' acl wiki hdr(host) -i pc-wiki.de www.pc-wiki.de\n use_backend be_app if wiki',generated)
+    again=doc(generated)
+    assert {(r.domain,r.certificate) for r in again.imported_routes}=={('pc-wiki.de','one'),('www.pc-wiki.de','two')}
+    assert all(not r.aliases for r in again.imported_routes)

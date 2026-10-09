@@ -91,3 +91,8 @@ Die Versionshistorie enthält außerdem die vorherige **zusammengeführte Konfig
 ### Vorhandene Basic-Auth-Regeln umstellen
 
 Wenn ein importierter Backend-Pool bereits `http-request auth` verwendet, unter **Proxy Hosts** die Domain-Zuordnung bearbeiten, eine zentrale Gruppe auswählen und **Vorhandene Backend-Anmeldung für diese Domain ersetzen** bestätigen. Andere Domains und Frontends behalten ihre bisherigen Regeln. Anschließend **Konfiguration erzeugen → Prüfen & anwenden**. Die Umstellung und ursprünglichen Regeln bleiben beim erneuten Einlesen erhalten. Einzelheiten stehen in [BASIC_AUTH.md](BASIC_AUTH.md).
+
+
+### Host-ACLs mit mehreren Namen
+
+Einfache zusammenhängende Paare wie `acl wiki hdr(host) -i pc-wiki.de www.pc-wiki.de` gefolgt von `use_backend be_wiki if wiki` werden als ein bearbeitbarer Eintrag mit weiteren Hostnamen übernommen. Beim Speichern gelten Backend, Website-Zugang und Zertifikatsauswahl für alle Namen. Bestehende zentrale Authentifizierungs- oder Zertifikatszuordnungen mit unterschiedlichen Einstellungen werden beim erneuten Import getrennt übernommen. Maps werden weiterhin pro Domain übernommen, sodass unabhängige Website-Einstellungen erhalten bleiben. Komplexe oder anderweitig verwendete ACLs bleiben im Texteditor.

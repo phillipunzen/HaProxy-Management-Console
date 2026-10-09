@@ -26,10 +26,14 @@ def enhance(config,doc,cap):
     config=tls_bindings.restore(config)
     sites={}
     for host in doc.hosts:
-        if host.enabled and host.certificate:sites.setdefault(host.frontend,[]).append({'domain':host.domain,'certificate':host.certificate})
+        if host.enabled and host.certificate:sites.setdefault(host.frontend,[]).extend({'domain':name,'certificate':host.certificate} for name in host.hostnames)
     for route in doc.imported_routes:
-        if route.certificate:sites.setdefault(route.frontend,[]).append({'domain':route.domain,'certificate':route.certificate})
-    edited={(h.frontend,h.domain) for h in doc.hosts}|{(r.frontend,r.domain) for r in doc.imported_routes}
+        if route.certificate:sites.setdefault(route.frontend,[]).extend({'domain':name,'certificate':route.certificate} for name in route.hostnames)
+    edited={(h.frontend,name) for h in doc.hosts for name in h.hostnames}|{(r.frontend,name) for r in doc.imported_routes for name in r.hostnames}
+    if doc.imported_config:
+        from backend.haproxy_config import map_routes
+        _,original_routes,_=map_routes(doc.imported_config,[m.model_dump() for m in doc.imported_maps])
+        edited.update((r.frontend,name) for r in original_routes for name in r.hostnames)
     for plan in old:
         for site in plan['sites']:
             if (plan['frontend'],site['domain']) not in edited:sites.setdefault(plan['frontend'],[]).append(site)
@@ -91,7 +95,8 @@ def enhance(config,doc,cap):
                         # cannot silently collide with an already used port.
                         if any(f.name in (old_name,section.name) for f in doc.frontends):raise ValueError(f'Port {port} ist bereits durch {old_name} belegt.')
                 seen.setdefault(port,[]).append((addr,section.name))
-    hosts=sorted((h for h in doc.hosts if h.enabled),key=lambda h:(-len(h.path),h.domain.startswith('*.')))
+    from backend.generator import host_acl,host_order
+    hosts=sorted((h for h in doc.hosts if h.enabled),key=host_order)
     for host in hosts:
         front=frontends.get(host.frontend)
         if not front or front.mode!='http':raise ValueError('Proxy Host benötigt ein vorhandenes HTTP-Frontend: '+host.frontend)
@@ -99,9 +104,7 @@ def enhance(config,doc,cap):
         if (host.force_https or host.certificate) and not tls:raise ValueError('Für HTTPS ein Frontend mit TLS auswählen: '+host.frontend)
         # The legacy shared listener already contains its hosts and backends.
         if doc.imported_config is None and host.frontend=='public_http':continue
-        matcher='hdr_end(host),field(1,:) -i' if host.domain.startswith('*.') else 'hdr(host),field(1,:) -i'
-        domain=host.domain[1:] if host.domain.startswith('*.') else host.domain
-        entries=[f'    acl host_{host.id} {matcher} {domain}',f'    acl path_{host.id} path_beg {host.path}']
+        entries=host_acl(host)+[f'    acl path_{host.id} path_beg {host.path}']
         if any(re.search(r'\bacl\s+(?:host_|path_)'+re.escape(host.id)+r'\b',line) for line in lines):raise ValueError('Proxy-Host-ACL existiert bereits: '+host.id)
         if host.force_https:entries+=[f'    http-request redirect scheme https code 301 if host_{host.id} path_{host.id} !{{ ssl_fc }}']
         entries+=[f'    use_backend backend_{host.id} if host_{host.id} path_{host.id}']

@@ -126,3 +126,6 @@ Referenzen: [LEGO v5-Befehle](https://go-acme.github.io/lego/references/ref-flag
 Die Auswahl **Zertifikat für HTTPS** am Reverseproxy bzw. der importierten Domain-Zuordnung hat Vorrang für diese Domain. Eine zusätzliche Zuweisung am Frontend ist nicht nötig. Das Frontend muss TLS aktiviert haben. Auch bei überlappenden SANs oder Wildcards verwendet der Dienst das gewählte Zertifikat für die zugewiesene Domain; andere Domains behalten ihre Frontend-Zertifikate. **Konfiguration erzeugen → Prüfen & anwenden** aktiviert die Auswahl.
 
 Management-Container und HAProxy-Agent aktualisieren; unter **Server** ist der Agent-Update-Befehl verfügbar. Der Agent erstellt die benötigten SNI-Listen unter `.control-tls` im Zertifikatsverzeichnis und berücksichtigt sie bei Prüfung, Reload, Rollback und Zertifikatserneuerung. Beim erneuten Import bleibt die Auswahl erhalten. Einzelheiten: [PROXIES.md](PROXIES.md).
+
+
+Bei Reverseproxy-Einträgen mit **Weiteren Hostnamen** muss das ausgewählte Zertifikat die Hauptdomain und alle zusätzlichen Namen abdecken (SAN oder passendes Wildcard). Die Erzeugung prüft jeden Namen. Alle Namen des Eintrags erhalten dieselbe Zertifikatsauswahl über SNI. Die Übernahme der Proxy-Host-Domains im Anforderungsdialog berücksichtigt zusätzliche Namen.
