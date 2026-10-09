@@ -240,7 +240,7 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
 def generate_imported(doc):
     original=doc.imported_config
     baseline,_=extract_backends(original)
-    if doc.hosts or doc.rules:raise ValueError('Übernommene Konfiguration: neue Domain-Routen und Regeln im Texteditor ergänzen.')
+    if doc.rules:raise ValueError('Übernommene Konfiguration: allgemeine Regeln im Texteditor ergänzen.')
     if {b.name for b in doc.imported_backends}!={b.name for b in baseline}:
         raise ValueError('Übernommene Backend-Pools können hier nicht hinzugefügt oder entfernt werden.')
     lines,sections=parse_sections(original); lookup={b.name:b for b in baseline}; patch={}
@@ -274,6 +274,7 @@ def generate_imported(doc):
             patch[index]=match[1]+addr+body+sep+comment+(match[4] or '')
     rules,_,_=map_routes(original,[m.model_dump() for m in doc.imported_maps])
     valid_fronts={rule['frontend'] for rule in rules};back_names={s.name for s in sections if s.kind in ('backend','listen')}
+    back_names.update(b.name for b in doc.backends if b.mode=='http')
     if any(r.frontend not in valid_fronts or r.backend not in back_names for r in doc.imported_routes):
         raise ValueError('Domain-Routen müssen einen eingelesenen Frontend- und Backend-Namen verwenden.')
     for rule in rules:

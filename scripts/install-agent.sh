@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from zipfile import ZipFile
 allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/haproxy_config.py',
-           'agent/__init__.py', 'agent/main.py', 'agent/config_bundle.py', 'agent/config.example.json']
+           'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/config_bundle.py', 'agent/config.example.json']
 with ZipFile(sys.argv[1]) as archive:
     for name in allowed:
         target = Path(sys.argv[2]) / name

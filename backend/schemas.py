@@ -112,6 +112,16 @@ class InstanceIn(InstanceMetadataIn):
         self.agent_url = self.agent_url.rstrip('/')
         return self
 
+class InstanceUpdateIn(InstanceIn):
+    token: str | None = Field(default=None,max_length=500)
+
+    @field_validator('token')
+    @classmethod
+    def retained_token(cls,value):
+        if value == '':return None
+        if value is not None and len(value)<32:raise ValueError('Ein neuer Agent-Token benötigt mindestens 32 Zeichen.')
+        return value
+
 class BackendServer(BaseModel):
     address: str = Field(min_length=1, max_length=253)
     port: int = Field(ge=1, le=65535, default=80)
@@ -136,6 +146,8 @@ class Host(BaseModel):
     path: str = Field(default='/', max_length=300)
     enabled: bool = True
     force_https: bool = False
+    frontend: str = Field(default='public_http',pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    certificate: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     balance: Literal['roundrobin', 'leastconn', 'source'] = 'roundrobin'
     servers: list[BackendServer] = Field(min_length=1, max_length=30)
     basic_auth_group: int | None = Field(default=None,ge=1)
@@ -208,6 +220,7 @@ class ImportedRoute(BaseModel):
     backend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     basic_auth_group: int | None = Field(default=None,ge=1)
     basic_auth_forward: bool = False
+    certificate: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
 
     @field_validator('domain')
     @classmethod
@@ -238,6 +251,24 @@ class ImportedSource(BaseModel):
             raise ValueError('Dateipfad muss absolut sein und darf kein .. enthalten.')
         return value
 
+class ManagedBackend(BaseModel):
+    name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    mode: Literal['http','tcp'] = 'http'
+    balance: Literal['roundrobin','leastconn','source'] = 'roundrobin'
+    servers: list[BackendServer] = Field(min_length=1,max_length=100)
+
+class ManagedFrontend(BaseModel):
+    name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    mode: Literal['http','tcp'] = 'http'
+    bind_address: str = '0.0.0.0'
+    port: int = Field(ge=1,le=65535)
+    tls_enabled: bool = False
+    backend: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+
+    @field_validator('bind_address')
+    @classmethod
+    def bind_ok(cls,value):return str(ipaddress.ip_address(value))
+
 class Document(BaseModel):
     http_port: int = Field(default=80, ge=1, le=65535)
     https_port: int = Field(default=443, ge=1, le=65535)
@@ -248,6 +279,9 @@ class Document(BaseModel):
     maxconn: int = Field(default=4096, ge=100, le=1000000)
     hosts: list[Host] = Field(default_factory=list, max_length=200)
     rules: list[Rule] = Field(default_factory=list, max_length=200)
+    frontends: list[ManagedFrontend] = Field(default_factory=list,max_length=200)
+    backends: list[ManagedBackend] = Field(default_factory=list,max_length=200)
+    frontend_certificates: dict[str,list[str]] = Field(default_factory=dict,max_length=500)
     version: int = 0
     imported_config: str | None = Field(default=None,max_length=1024*1024)
     imported_active_hash: str | None = Field(default=None,pattern=r'^[a-f0-9]{64}$')
@@ -283,8 +317,22 @@ class Document(BaseModel):
             raise ValueError('Map-Dateien zusammen höchstens 1 MB groß.')
         if self.tls_enabled and self.http_port == self.https_port:
             raise ValueError('HTTP und HTTPS benötigen verschiedene Ports.')
-        if not self.tls_enabled and any(h.enabled and h.force_https for h in self.hosts):
+        if self.imported_config is None and not self.tls_enabled and any(h.enabled and h.force_https and h.frontend=='public_http' for h in self.hosts):
             raise ValueError('HTTPS-Weiterleitungen benötigen einen aktiven HTTPS-Listener.')
+        for items in (self.frontends,self.backends):
+            if len({v.name for v in items})!=len(items):raise ValueError('Frontend- und Backend-Namen müssen eindeutig sein.')
+        names=[f.name for f in self.frontends]+[b.name for b in self.backends]+['backend_'+h.id for h in self.hosts]
+        if len(set(names))!=len(names):raise ValueError('Neue Proxy-Namen dürfen nicht mehrfach verwendet werden.')
+        if self.imported_config is not None:
+            from backend.haproxy_config import parse_sections
+            existing={s.name for s in parse_sections(self.imported_config)[1] if s.kind in ('frontend','backend','listen')}
+        else:existing={'public_http','unknown_host','acme_webroot'}
+        if existing&set(names):raise ValueError('Proxy-Name existiert bereits: '+', '.join(sorted(existing&set(names))))
+        routes=[(h.frontend,h.domain,h.path) for h in self.hosts if h.enabled]+[(r.frontend,r.domain,'/') for r in self.imported_routes]
+        if len(set(routes))!=len(routes):raise ValueError('Domain und Pfad dürfen pro Frontend nur einmal zugewiesen sein.')
+        for frontend,names in self.frontend_certificates.items():
+            if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',frontend) or len(names)>100 or len(set(names))!=len(names) or any(not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',name) for name in names):
+                raise ValueError('Zertifikatszuweisung benötigt gültige Frontend- und Zertifikatsnamen.')
         return self
 
 class DraftIn(BaseModel):
@@ -299,6 +347,8 @@ class CertificateIn(BaseModel):
     challenge: Literal['http', 'dns'] = 'http'
     provider: str = Field(default='', pattern=r'^[a-z0-9-]*$')
     staging: bool = True
+    engine: Literal['certbot','lego'] = 'certbot'
+    automatic: bool = True
 
     @model_validator(mode='after')
     def check(self):
@@ -311,4 +361,43 @@ class CertificateIn(BaseModel):
             raise ValueError('Wildcard-Zertifikate benötigen DNS-Challenges.')
         if self.challenge == 'dns' and not self.provider:
             raise ValueError('DNS-Anbieter erforderlich.')
+        if len(set(self.domains))!=len(self.domains):raise ValueError('Domains müssen eindeutig sein.')
         return self
+
+class CertificateAdoptIn(CertificateIn):
+    engine: Literal['lego'] = 'lego'
+    staging: Literal[False] = False
+    source_name: str = Field(min_length=1,max_length=253,pattern=r'^[a-zA-Z0-9_.*-]+$')
+
+    @field_validator('source_name')
+    @classmethod
+    def source_ok(cls,value):
+        if value in ('.','..'):raise ValueError('Ungültiger LEGO-Zertifikatsname.')
+        return value
+
+class CertificateRenewIn(BaseModel):
+    name: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
+    force: bool = False
+
+    @model_validator(mode='after')
+    def selected_force(self):
+        if self.force and not self.name:raise ValueError('Erzwungene Erneuerung nur für ein ausgewähltes Zertifikat.')
+        return self
+
+class RenewalSettingsIn(BaseModel):
+    enabled: bool = True
+    schedule: Literal['interval','daily'] = 'interval'
+    interval_hours: int = Field(default=12,ge=1,le=168)
+    daily_time: str = Field(default='03:15',pattern=r'^(?:[01][0-9]|2[0-3]):[0-5][0-9]$')
+    timezone: str = 'Europe/Berlin'
+
+    @field_validator('timezone')
+    @classmethod
+    def timezone_ok(cls,value):
+        from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+        try:ZoneInfo(value)
+        except (ValueError,ZoneInfoNotFoundError):raise ValueError('Unbekannte Zeitzone.')
+        return value
+
+class CertificatePolicyIn(BaseModel):
+    automatic: bool = True

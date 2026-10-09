@@ -20,7 +20,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from fastapi import FastAPI, HTTPException, Request, Depends
 from pydantic import BaseModel, Field
-from backend.schemas import CertificateIn
+from backend.schemas import CertificateIn,CertificateAdoptIn,CertificateRenewIn,RenewalSettingsIn,CertificatePolicyIn
+from agent import certificates as certificate_jobs
 from backend.haproxy_config import migration_context
 from agent.config_bundle import read_bundle
 
@@ -262,44 +263,22 @@ def certbot_args(p,body):
 
 
 def issue(p,body):
-    require_certificate_scope(p)
-    cert_name,args=certbot_args(p,body)
-    run(args,timeout=240)
-    directory=Path(p.get('letsencrypt_dir','/etc/letsencrypt'))/'live'/cert_name
-    result=install_pem(p,body.name,(directory/'fullchain.pem').read_bytes()+(directory/'privkey.pem').read_bytes(),body.staging)
-    state=cert_state(p)
-    entries=json.loads(state.read_text()) if state.exists() else {}
-    entries[cert_name]={'name':body.name,'staging':body.staging}
-    atomic(state,json.dumps(entries).encode(),0o600)
-    return result
+    return certificate_jobs.issue(p,body)
 
 
 def renew(p):
-    require_certificate_scope(p)
-    state=cert_state(p)
-    entries=json.loads(state.read_text()) if state.exists() else {}
-    renewed=[]
-    for cert_name,entry in entries.items():
-        if entry['staging']: continue
-        run([p.get('certbot_binary','certbot'),'renew','--non-interactive','--cert-name',cert_name],timeout=240)
-        directory=Path(p.get('letsencrypt_dir','/etc/letsencrypt'))/'live'/cert_name
-        pem=(directory/'fullchain.pem').read_bytes()+(directory/'privkey.pem').read_bytes()
-        target=Path(p['cert_dir'])/(entry['name']+'.pem')
-        if not target.exists() or target.read_bytes()!=pem:
-            renewed.append(install_pem(p,entry['name'],pem))
-    return {'renewed':renewed,'checked':len(entries)}
+    return certificate_jobs.renew(p)
 
 
 async def renewal_loop():
     await asyncio.sleep(60)
     while True:
         for name,p in PROFILES.items():
-            try:
-                def task():
-                    with lock(p): return renew(p)
-                await asyncio.to_thread(task)
-            except Exception: logger.exception('Certificate renewal failed for %s',name)
-        await asyncio.sleep(12*3600)
+            try:await asyncio.to_thread(certificate_jobs.scheduled_check,p)
+            except HTTPException as error:
+                if error.status_code!=409:logger.exception('Certificate renewal failed for %s',name)
+            except Exception:logger.exception('Certificate renewal failed for %s',name)
+        await asyncio.sleep(60)
 
 
 @asynccontextmanager
@@ -331,7 +310,7 @@ def health(): return {'status':'ok'}
 def capabilities(profile: str,p=Depends(auth)):
     return {k:v for k,v in p.items() if k in ('kind','runtime_socket_config','cert_dir_config','container','service')} | {
         'dns_providers':list(p.get('dns_providers',{})), 'http_challenge':bool(p.get('acme_webroot')),
-        'automatic_renewal':True,'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
+        'automatic_renewal':True,'certificate_management':True,'acme_engines':['certbot']+(['lego'] if p.get('lego') else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
 
 @app.get('/profiles/{profile}/config-bundle')
 def config_bundle(profile: str,p=Depends(auth)):
@@ -456,7 +435,7 @@ def certificates(profile: str,p=Depends(auth)):
     result=[]
     for staging,directory in ((False,Path(p['cert_dir'])),(True,Path(p['cert_dir'])/'.staging')):
         for path in directory.glob('*.pem'):
-            try: result.append(certificate_meta(path,staging))
+            try: result.append(certificate_meta(path,staging)|certificate_jobs.status(p,path.stem,staging))
             except ValueError: result.append({'name':path.stem,'error':'Ungültiges PEM','staging':staging})
     return result
 
@@ -466,8 +445,29 @@ def issue_endpoint(profile: str,body: CertificateIn,p=Depends(auth)):
 
 @app.post('/profiles/{profile}/certificates/import')
 def import_endpoint(profile: str,body: PemIn,p=Depends(auth)):
-    with lock(p): return install_pem(p,body.name,body.pem.encode())
+    with lock(p):
+        result=install_pem(p,body.name,body.pem.encode())
+        certificate_jobs.forget(p,body.name)
+        return result
 
 @app.post('/profiles/{profile}/certificates/renew')
-def renew_endpoint(profile: str,p=Depends(auth)):
-    with lock(p): return renew(p)
+def renew_endpoint(profile: str,body:CertificateRenewIn,p=Depends(auth)):
+    with lock(p): return certificate_jobs.renew(p,body.name,body.force)
+
+@app.get('/profiles/{profile}/certificates/renewal-settings')
+def renewal_settings(profile: str,p=Depends(auth)):
+    return certificate_jobs.schedule_public(p)
+
+@app.put('/profiles/{profile}/certificates/renewal-settings')
+def save_renewal_settings(profile: str,body:RenewalSettingsIn,p=Depends(auth)):
+    with lock(p):
+        require_certificate_scope(p)
+        return certificate_jobs.save_schedule(p,body)
+
+@app.put('/profiles/{profile}/certificates/{name}/policy')
+def certificate_policy(profile: str,name:str,body:CertificatePolicyIn,p=Depends(auth)):
+    with lock(p):return certificate_jobs.policy(p,name,body)
+
+@app.post('/profiles/{profile}/certificates/adopt-lego')
+def adopt_lego(profile: str,body:CertificateAdoptIn,p=Depends(auth)):
+    with lock(p):return certificate_jobs.adopt_lego(p,body)

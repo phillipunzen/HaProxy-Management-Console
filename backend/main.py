@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import re
 import hmac
 import logging
 import secrets
@@ -27,10 +28,10 @@ from backend import metrics as metric_store
 from backend import topology as topology_store
 from backend import basic_auth,basic_auth_api,infrastructures
 from backend.settings import settings
-from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,InstanceMetadataIn,Document,DraftIn,CertificateIn,ImportedMap
+from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,InstanceUpdateIn,InstanceMetadataIn,Document,DraftIn,CertificateIn,ImportedMap,CertificateAdoptIn,CertificateRenewIn,RenewalSettingsIn,CertificatePolicyIn
 from backend.generator import generate
 from backend.agent_setup import AgentSetupIn, build_plan, build_update_command
-from backend.haproxy_config import import_config, enrich_stats, migration_context, MIGRATION_PREFIX
+from backend.haproxy_config import import_config, enrich_stats, migration_context, MIGRATION_PREFIX,inventory,extract_backends
 from pydantic import BaseModel, Field
 
 ph=PasswordHasher()
@@ -355,15 +356,19 @@ def add_instance(body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
     return public_instance(i,metadata,infrastructures.assignment(db,i.id))
 
 @app.put('/api/instances/{id}')
-def edit_instance(id:int,body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
+def edit_instance(id:int,body:InstanceUpdateIn,user=Depends(admin),db=Depends(get_db)):
     i=instance(db,id)
     if db.scalar(select(Instance.id).where(Instance.id!=id,Instance.agent_url==body.agent_url,Instance.profile==body.profile)):
         raise HTTPException(409,'Dieses Agent-Profil ist bereits angebunden.')
-    candidate=Instance(agent_url=body.agent_url,profile=body.profile,token_cipher=cipher.encrypt(body.token.encode()).decode())
-    cap=agent(candidate)
+    before=(i.agent_url,i.profile,i.token_cipher,i.allow_http)
+    token_cipher=cipher.encrypt(body.token.encode()).decode() if body.token else i.token_cipher
+    connection_changed=(body.agent_url,body.profile,token_cipher,body.allow_http)!=before
+    candidate=Instance(agent_url=body.agent_url,profile=body.profile,token_cipher=token_cipher,allow_http=body.allow_http)
+    cap=agent(candidate) if connection_changed else {'kind':i.kind}
     db.rollback()
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i:raise HTTPException(404,'Instanz wurde entfernt.')
+    if (i.agent_url,i.profile,i.token_cipher,i.allow_http)!=before:raise HTTPException(409,'Serververbindung wurde parallel geändert. Bitte neu laden.')
     metadata=store_instance_metadata(db,id,body) if {'tags','location','infrastructure_id'}&body.model_fields_set else db.get(InstanceMetadata,id)
     for key in ('name','agent_url','profile','allow_http','notes'): setattr(i,key,getattr(body,key))
     i.token_cipher=candidate.token_cipher;i.kind=cap['kind']
@@ -394,6 +399,33 @@ def config(id:int,user=Depends(operator),db=Depends(get_db)): return agent(insta
 def document(id:int,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);return i.document|{'version':i.document_version}
 
+@app.get('/api/instances/{id}/proxy-layout')
+def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
+    i=instance(db,id);cap=agent(i);doc=Document.model_validate(i.document)
+    try:
+        config=generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc)))
+        error=None
+    except ValueError as exc:
+        config=doc.imported_config or '';error=str(exc)
+        # Keep incomplete new listeners and pools visible so the operator can
+        # fix their references or ports from the same editor.
+        from backend.managed_proxy import backend as pool_config,endpoint
+        if doc.imported_config is None:
+            config=f'defaults\n    mode http\nfrontend public_http\n    bind :{doc.http_port}\n'
+        for pool in doc.backends:
+            config+='\n'+'\n'.join(pool_config(pool.name,pool.mode,pool.balance,pool.servers))+'\n'
+        for host in doc.hosts:
+            if host.enabled:config+='\n'+'\n'.join(pool_config('backend_'+host.id,'http',host.balance,host.servers))+'\n'
+        for front in doc.frontends:
+            config+=f'\nfrontend {front.name}\n    mode {front.mode}\n    bind {endpoint(front.bind_address,front.port)}'+(' ssl' if front.tls_enabled else '')+'\n'
+            if front.backend:config+='    default_backend '+front.backend+'\n'
+    proxies=inventory(config)
+    pools,_=extract_backends(config)
+    for proxy in proxies:
+        proxy['targets']=next(([{'name':s.name,'address':s.address,'port':s.port} for s in b.servers] for b in pools if b.name==proxy['name']),[])
+    return {'frontends':[p for p in proxies if p['kind'] in ('frontend','listen')],
+            'backends':[p for p in proxies if p['kind'] in ('backend','listen')],'error':error}
+
 @app.put('/api/instances/{id}/document')
 def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)):
     basic_auth.lock_directory(db)
@@ -418,6 +450,16 @@ def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
                 if {s.path:s.hash for s in doc.imported_sources}!={s['path']:s['hash'] for s in bundle['sources']} or {m.path:m.hash for m in doc.imported_map_hashes}!={m['host_path']:m['hash'] for m in bundle['maps']}:
                     raise HTTPException(409,'Eine Konfigurations- oder Map-Datei wurde geändert. Erneut importieren.')
         config=generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc)))
+        assigned={name for names in doc.frontend_certificates.values() for name in names}
+        assigned.update(h.certificate for h in doc.hosts if h.enabled and h.certificate)
+        assigned.update(r.certificate for r in doc.imported_routes if r.certificate)
+        if assigned:
+            certs={c['name']:c for c in agent(i,'/certificates') if not c.get('staging') and c.get('days_remaining',-1)>=0 and not c.get('error')}
+            if assigned-certs.keys():raise ValueError('Zugewiesene Produktionszertifikate fehlen oder sind abgelaufen: '+', '.join(sorted(assigned-certs.keys())))
+            for site in [h for h in doc.hosts if h.enabled]+doc.imported_routes:
+                if not site.certificate:continue
+                covered=any(site.domain==d or (d.startswith('*.') and not site.domain.startswith('*.') and site.domain.count('.')==d.count('.') and site.domain.endswith(d[1:])) for d in certs[site.certificate].get('domains',[]))
+                if not covered:raise ValueError('Zertifikat '+site.certificate+' deckt '+site.domain+' nicht ab.')
         if len(config.encode())>1024*1024:raise ValueError('Erzeugte Konfiguration mit Basic-Auth-Benutzern ist größer als 1 MB.')
     except ValueError as e: raise HTTPException(422,str(e))
     return {'config':config,'base_hash':current['hash']}
@@ -580,9 +622,33 @@ def import_cert(id:int,body:dict,user=Depends(operator),db=Depends(get_db)):
     audit(db,user.username,'certificate.imported',i.name,payload.name);db.commit();return result
 
 @app.post('/api/instances/{id}/certificates/renew')
-def renew(id:int,user=Depends(operator),db=Depends(get_db)):
-    i=instance(db,id);result=agent(i,'/certificates/renew','POST',{},timeout=300)
+def renew(id:int,body:CertificateRenewIn,user=Depends(operator),db=Depends(get_db)):
+    i=instance(db,id);result=agent(i,'/certificates/renew','POST',body.model_dump(),timeout=300)
     audit(db,user.username,'certificates.renewed',i.name);db.commit();return result
+
+@app.get('/api/instances/{id}/certificates/renewal-settings')
+def renewal_settings(id:int,user=Depends(current_user),db=Depends(get_db)):
+    return agent(instance(db,id),'/certificates/renewal-settings')
+
+@app.put('/api/instances/{id}/certificates/renewal-settings')
+def update_renewal_settings(id:int,body:RenewalSettingsIn,user=Depends(operator),db=Depends(get_db)):
+    i=instance(db,id);result=agent(i,'/certificates/renewal-settings','PUT',body.model_dump())
+    audit(db,user.username,'certificates.schedule.updated',i.name);db.commit();return result
+
+@app.put('/api/instances/{id}/certificates/{name}/policy')
+def update_certificate_policy(id:int,name:str,body:CertificatePolicyIn,user=Depends(operator),db=Depends(get_db)):
+    if not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}',name):raise HTTPException(422,'Ungültiger Zertifikatsname.')
+    i=instance(db,id);result=agent(i,f'/certificates/{name}/policy','PUT',body.model_dump())
+    audit(db,user.username,'certificate.policy.updated',i.name,name);db.commit();return result
+
+@app.post('/api/instances/{id}/certificates/adopt-lego')
+def adopt_lego(id:int,body:CertificateAdoptIn,user=Depends(operator),db=Depends(get_db)):
+    i=instance(db,id);result=agent(i,'/certificates/adopt-lego','POST',body.model_dump(),timeout=65)
+    audit(db,user.username,'certificate.lego.adopted',i.name,body.name);db.commit();return result
+
+@app.get('/api/certificate-guide')
+def certificate_guide(user=Depends(current_user)):
+    return FileResponse(Path(__file__).resolve().parent.parent/'docs'/'CERTIFICATES.md',filename='HAProxy-Zertifikate.md',media_type='text/markdown')
 
 @app.get('/api/audit')
 def audit_log(user=Depends(admin),db=Depends(get_db)):

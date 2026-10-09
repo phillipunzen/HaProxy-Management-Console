@@ -490,3 +490,5 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 .import-agent-update .button { margin:8px 10px 0 0; }
 
 .imported-form-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+
+.certificate-actions{flex-wrap:wrap;gap:10px}.certificate-actions + .stats-note{margin-top:16px}

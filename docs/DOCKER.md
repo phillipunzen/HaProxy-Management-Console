@@ -123,3 +123,7 @@ Unter **Topologie** stehen Sites, TCP-Dienste, Backend-Pools und Zielserver als 
 ## Mehrere Infrastrukturen
 
 Unter **Infrastrukturen** Gruppen anlegen und Server unter **Server → Zuordnung bearbeiten** zuweisen. Zertifikate und Konfigurationen gehören zur ausgewählten HAProxy-Instanz. Die [Anleitung im Paket](docs/INFRASTRUCTURES.md) beschreibt getrennte Zertifikatsverzeichnisse, Cloudflare-Konten und die Auswahl des Zielservers. [Anleitung auf GitHub](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/INFRASTRUCTURES.md). Bestehende Installationen benötigen keine neuen ENV-Variablen.
+
+## Zertifikate und Proxy-Editor
+
+[LEGO-Aufträge übernehmen und Erneuerung steuern](docs/CERTIFICATES.md) sowie [HTTP-/TCP-Frontends und Backend-Pools aufbauen](docs/PROXIES.md). Nach einem Image-Update den Agenten auf bestehenden HAProxy-Hosts unter Server aktualisieren, um die neuen Zertifikatsfunktionen zu nutzen. LEGO und DNS-Zugangsdaten liegen auf dem HAProxy-Host, nicht im Management-Container.

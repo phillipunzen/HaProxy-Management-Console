@@ -10,6 +10,8 @@ files = {
     'docker-compose.yml': root / 'docker-compose.yml',
     '.env.example': root / '.env.example',
     'README.md': root / 'docs' / 'DOCKER.md',
+    'docs/CERTIFICATES.md': root / 'docs' / 'CERTIFICATES.md',
+    'docs/PROXIES.md': root / 'docs' / 'PROXIES.md',
     'docs/AGENT.md': root / 'docs' / 'AGENT.md',
     'docs/IMPORT.md': root / 'docs' / 'IMPORT.md',
     'docs/METRICS.md': root / 'docs' / 'METRICS.md',
@@ -23,7 +25,7 @@ files = {
     'backend/haproxy_config.py': root / 'backend' / 'haproxy_config.py',
     'backend/basic_auth.py': root / 'backend' / 'basic_auth.py',
 }
-for name in ('__init__.py', 'main.py', 'config_bundle.py', 'config.example.json',
+for name in ('__init__.py', 'main.py', 'certificates.py', 'config_bundle.py', 'config.example.json',
              'haproxy-control-agent.service', 'haproxy-control-webroot.service'):
     files[f'agent/{name}'] = root / 'agent' / name
 with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:

@@ -22,6 +22,8 @@ COPY backend/ ./backend/
 COPY agent/ ./agent/
 COPY docs/AGENT.md ./docs/AGENT.md
 COPY docs/IMPORT.md ./docs/IMPORT.md
+COPY docs/CERTIFICATES.md ./docs/CERTIFICATES.md
+COPY docs/PROXIES.md ./docs/PROXIES.md
 COPY scripts/install-agent.sh ./scripts/install-agent.sh
 COPY downloads/haproxy-management-docker.zip ./downloads/haproxy-management-docker.zip
 COPY --from=ui /build/frontend/dist/ ./frontend/dist/

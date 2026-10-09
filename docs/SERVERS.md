@@ -23,3 +23,7 @@ Tags und Standort werden außerdem in der Serverübersicht angezeigt. Der Stando
 ## Update
 
 Die Anwendung erstellt automatisch eine zusätzliche Tabelle in MariaDB. Bestehende Server bleiben erhalten und haben zunächst keine Tags und keinen Standort. Es werden keine neuen ENV-Variablen oder Schlüssel benötigt. Ältere API-Clients, die diese Felder beim Bearbeiten einer Verbindung nicht mitsenden, behalten vorhandene Zuordnungen bei.
+
+## Bestehende Server bearbeiten
+
+Im allgemeinen Serverdialog ist der Agent-Token beim Bearbeiten optional: leer lassen, um den gespeicherten verschlüsselten Token beizubehalten. Name, Tags, Standort, Infrastruktur und Notiz werden ohne Agent-Aufruf gespeichert und funktionieren auch bei einem offline Host. Änderungen an Agent-Adresse, Profil, HTTP-Freigabe oder Token prüfen weiterhin die Verbindung vor dem Speichern. Einen neuen Token nur bei einem tatsächlichen Tokenwechsel eintragen. Beim erstmaligen Verbinden bleibt der Token erforderlich.

@@ -1,9 +1,10 @@
+import { CertificateSelector, type Certificate } from './Certificates';
 import { useEffect, useRef, useState } from 'react';
 import { BasicAuthSelector, type BasicGroup } from './BasicAuth';
 import { FileCode2, Loader2, Upload, Check, Settings2, Plus, Trash2, Terminal, Copy, RefreshCw } from 'lucide-react';
 
 export type ImportedBackend={name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean}[]};
-export type ImportedRoute={id:string;frontend:string;domain:string;backend:string;basic_auth_group?:number|null;basic_auth_forward?:boolean};
+export type ImportedRoute={id:string;frontend:string;domain:string;backend:string;basic_auth_group?:number|null;basic_auth_forward?:boolean;certificate?:string|null};
 export type ImportedFields={imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[]};
 type Request=(path:string,method?:string,body?:unknown)=>Promise<any>;
 
@@ -63,7 +64,7 @@ export function ImportedConfigPanel({groups,doc,onSave,onImport,onGenerate,onEdi
       {routes.length?<div className="table-wrap"><table><thead><tr><th>DOMAIN</th><th>FRONTEND</th><th>BACKEND</th><th>WEBSITE-ZUGANG</th><th></th></tr></thead><tbody>{routes.map((r,i)=><tr key={r.id}><td><strong>{r.domain}</strong></td><td>{r.frontend}</td><td>{r.backend}</td><td><span className={'badge '+(r.basic_auth_group?'blue':'neutral')}>{r.basic_auth_group?groups.find(g=>g.id===r.basic_auth_group)?.name||"Gruppe #"+r.basic_auth_group:'Öffentlich'}</span></td><td><button className="icon-button" disabled={locked} title="Domain und Website-Zugang bearbeiten" aria-label={'Domain '+r.domain+' bearbeiten'} onClick={()=>onEditRoute({...r},i)}><Settings2 size={16}/></button><button className="icon-button red-text" aria-label={'Domain '+r.domain+' entfernen'} disabled={locked} onClick={()=>void save({imported_routes:routes.filter((_,j)=>j!==i)})}><Trash2 size={16}/></button></td></tr>)}</tbody></table></div>:<p className="stats-empty">Keine einfachen Host-Map-Routen erkannt. Bestehende ACLs und dynamische Regeln bleiben im Texteditor erhalten.</p>}
     </section>
     <section className="panel"><div className="panel-header"><div><h2>Übernommene Backend-Pools</h2><p>HTTP und TCP getrennt gekennzeichnet. Healthchecks und zusätzliche Serveroptionen bleiben erhalten.</p></div><span className="badge">{backends.length}</span></div><div className="table-wrap"><table><thead><tr><th>POOL</th><th>MODUS</th><th>ZIELSERVER</th><th>VERTEILUNG</th><th></th></tr></thead><tbody>{backends.map(b=><tr key={b.name}><td><strong>{b.name}</strong></td><td><span className={'badge '+(b.mode==='tcp'?'amber':'neutral')}>{b.mode.toUpperCase()}</span></td><td>{b.servers.length?<details className="backend-targets"><summary>{b.servers.length} Zielserver</summary><div>{b.servers.map(s=><small key={s.name} className="mono">{s.name} · {s.address}:{s.port}{s.tls?' · TLS':''}</small>)}</div></details>:<small>Keine Zielserver</small>}</td><td>{b.balance||'Eigener Algorithmus'}</td><td><button className="icon-button" disabled={locked} aria-label={'Backend '+b.name+' bearbeiten'} onClick={()=>onEditBackend(structuredClone(b))}><Settings2 size={16}/></button></td></tr>)}</tbody></table></div></section>
-    <p className="stats-note">Neue TCP-Listener, komplexe ACLs, eigene Authentifizierungsregeln und TLS-Parameter werden weiterhin im vollständigen Konfigurationseditor bearbeitet. Zentrale Basic-Auth-Gruppen wählst du bei der Domain-Zuordnung. Änderungen werden erst nach Prüfung und Anwenden wirksam.</p>
+    <p className="stats-note">Neue Listener und Pools legst du unter Frontends & Backends an. Zusätzliche Reverseproxys erzeugen ihren Backend-Pool automatisch. Komplexe ACLs und weitere TLS-Parameter bearbeitest du im Konfigurationseditor. Zentrale Basic-Auth-Gruppen wählst du bei der Domain-Zuordnung. Änderungen werden erst nach Prüfung und Anwenden wirksam.</p>
   </>;
 }
 
@@ -92,7 +93,7 @@ export function ImportedBackendForm({initial,busy,onClose,onSave}:{initial:Impor
   </form>;
 }
 
-export function ImportedRouteForm({initial,groups,fronts,backends,busy,onClose,onSave}:{initial:ImportedRoute;groups:BasicGroup[];fronts:string[];backends:ImportedBackend[];busy:boolean;onClose:()=>void;onSave:(value:ImportedRoute)=>Promise<void>}){
+export function ImportedRouteForm({initial,groups,fronts,backends,certs=[],busy,onClose,onSave}:{initial:ImportedRoute;certs?:Certificate[];groups:BasicGroup[];fronts:string[];backends:ImportedBackend[];busy:boolean;onClose:()=>void;onSave:(value:ImportedRoute)=>Promise<void>}){
   const [route,setRoute]=useState<ImportedRoute>(()=>({...initial}));
   const {save,error,errorRef}=useImportedFormSave(onSave);
   const tcp=backends.find(b=>b.name===route.backend)?.mode==='tcp';
@@ -104,6 +105,7 @@ export function ImportedRouteForm({initial,groups,fronts,backends,busy,onClose,o
       <div className="form-grid"><div className="field"><label htmlFor="imported-frontend">Frontend</label><select id="imported-frontend" value={route.frontend} onChange={e=>setRoute({...route,frontend:e.target.value})}>{fronts.map(f=><option key={f}>{f}</option>)}</select></div>
         <div className="field"><label htmlFor="imported-target">Backend-Pool</label><input id="imported-target" required list="imported-backend-options" value={route.backend} onChange={e=>chooseBackend(e.target.value)}/><datalist id="imported-backend-options">{backends.map(b=><option key={b.name} value={b.name}/>)}</datalist></div>
       </div>
+      <CertificateSelector certs={certs} value={route.certificate} onChange={name=>setRoute({...route,certificate:name})}/>
       <BasicAuthSelector groups={groups} value={route.basic_auth_group} forward={route.basic_auth_forward} disabled={tcp} onChange={id=>setRoute({...route,basic_auth_group:id,basic_auth_forward:false})} onForward={forward=>setRoute({...route,basic_auth_forward:forward})}/>
       {!groups.length&&<p className="stats-note">Lege unter Basic Auth zuerst eine Gruppe an und ordne ihr die gewünschten Website-Benutzer zu. Danach kannst du die Gruppe hier auswählen.</p>}
       <p className="stats-note">Speichern ändert den grafischen Entwurf auf diesem Zielserver. Der Website-Zugang wird nach Konfiguration erzeugen, Prüfen und Anwenden aktiv.</p>

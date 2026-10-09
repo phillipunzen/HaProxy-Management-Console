@@ -5,9 +5,10 @@ def address(host, port):
 
 def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.basic_auth import inject
+    from backend.managed_proxy import enhance
     if doc.imported_config is not None:
         from backend.haproxy_config import generate_imported
-        return inject(generate_imported(doc),doc,basic_auth)
+        return inject(enhance(generate_imported(doc),doc,capabilities),doc,basic_auth)
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):
@@ -35,7 +36,7 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         else:
             name,value = rule.target.split(':',1)
             out += [f'    http-request set-header {name} {value.strip()} if {condition}']
-    hosts = sorted((h for h in doc.hosts if h.enabled), key=lambda h: (-len(h.path), h.domain.startswith('*.')))
+    hosts = sorted((h for h in doc.hosts if h.enabled and h.frontend=='public_http'), key=lambda h: (-len(h.path), h.domain.startswith('*.')))
     for host in hosts:
         matcher = 'hdr_end(host),field(1,:) -i' if host.domain.startswith('*.') else 'hdr(host),field(1,:) -i'
         domain = host.domain[1:] if host.domain.startswith('*.') else host.domain
@@ -49,11 +50,11 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     out += ['    default_backend unknown_host', '', 'backend unknown_host', '    http-request deny deny_status 404']
     if doc.acme_enabled:
         out += ['', 'backend acme_webroot', f'    server acme {address(doc.acme_address,doc.acme_port)}']
-    for host in hosts:
+    for host in (h for h in doc.hosts if h.enabled):
         out += ['', f'backend backend_{host.id}', f'    balance {host.balance}']
         for i, server in enumerate(host.servers):
             tls = ' ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt' if server.tls else ''
             if server.tls and ':' not in server.address and not server.address.replace('.', '').isdigit():
                 tls += f' sni str({server.address}) verifyhost {server.address}'
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
-    return inject('\n'.join(out) + '\n',doc,basic_auth)
+    return inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth)

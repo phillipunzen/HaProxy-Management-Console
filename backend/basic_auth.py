@@ -46,7 +46,7 @@ def hash_password(password):
 
 
 def bindings(doc):
-    result=[{'kind':'host','frontend':'public_http','backend':'backend_'+h.id,'domain':h.domain,'path':h.path,'group':h.basic_auth_group,'forward':h.basic_auth_forward} for h in doc.hosts if h.enabled and h.basic_auth_group]
+    result=[{'kind':'host','frontend':h.frontend,'backend':'backend_'+h.id,'domain':h.domain,'path':h.path,'group':h.basic_auth_group,'forward':h.basic_auth_forward} for h in doc.hosts if h.enabled and h.basic_auth_group]
     result += [{'kind':'route','domain':r.domain,'path':'/','frontend':r.frontend,'backend':r.backend,'group':r.basic_auth_group,'forward':r.basic_auth_forward} for r in doc.imported_routes if r.basic_auth_group]
     if doc.imported_config:
         old=read_metadata(doc.imported_config)
@@ -55,7 +55,7 @@ def bindings(doc):
             editable={(r.frontend,r.domain) for r in editable}
             # Uneditable pre-existing managed sites remain protected, including
             # native path hosts that the conservative import cannot yet edit.
-            result += [s for s in old['sites'] if s['kind']!='route' or (s['frontend'],s['domain']) not in editable]
+            result += [s for s in old['sites'] if (s['kind']!='route' or (s['frontend'],s['domain']) not in editable) and not any(h.frontend==s['frontend'] and h.domain==s['domain'] and h.path==s['path'] for h in doc.hosts)]
     return result
 
 
@@ -197,6 +197,9 @@ def validate_document(db,doc):
         _,sections=parse_sections(doc.imported_config)
         fronts={s.name:s.mode for s in sections if s.kind in ('frontend','listen')}
         backs={s.name:s.mode for s in sections if s.kind in ('backend','listen')}
+        fronts.update({f.name:f.mode for f in doc.frontends})
+        backs.update({b.name:b.mode for b in doc.backends})
+        backs.update({'backend_'+h.id:'http' for h in doc.hosts if h.enabled})
         if any(fronts.get(s['frontend'])!='http' or backs.get(s['backend'])!='http' for s in bindings(doc)):raise ValueError('Basic Auth ist nur für HTTP-Sites verfügbar, nicht für TCP-Passthrough.')
 
 

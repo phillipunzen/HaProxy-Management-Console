@@ -19,6 +19,8 @@ PASSWORD='test-password-123'
 
 @pytest.fixture
 def api(monkeypatch):
+    from collections import defaultdict,deque
+    monkeypatch.setattr(main,'failures',defaultdict(deque))
     engine=create_engine('sqlite://',connect_args={'check_same_thread':False},poolclass=StaticPool)
     @event.listens_for(engine,'connect')
     def foreign_keys(connection,record):connection.execute('PRAGMA foreign_keys=ON')
@@ -99,3 +101,101 @@ def test_setup_keeps_metadata_out_of_installation_command():
     body=AgentSetupIn(name='Edge',kind='native',host='192.168.10.71',profile='native',config_path='/etc/haproxy/haproxy.cfg',runtime_socket='/run/haproxy/admin.sock',cert_dir='/etc/haproxy/certs',allow_http=True,tags=['Prod','Customer-Label'],location='Frankfurt-RZ-1')
     plan=build_plan(body,'http://192.168.10.70:8100',Path(__file__).resolve().parents[1]);assert plan['instance']['tags']==body.tags and plan['instance']['location']==body.location
     assert 'Customer-Label' not in plan['command'] and 'Frankfurt-RZ-1' not in plan['command']
+
+@pytest.mark.parametrize('token',[None,'','omitted'])
+def test_full_server_edit_retains_token_and_works_offline(api,token):
+    client,factory=api
+    with factory() as db:
+        i=db.get(Instance,1);i.allow_http=True;db.commit();stored=i.token_cipher
+    payload={'name':'Renamed edge','agent_url':'http://192.0.2.1:9101','profile':'native','allow_http':True,'notes':'Changed offline','tags':['Prod'],'location':'Berlin'}
+    if token!='omitted':payload['token']=token
+    response=client.put('/api/instances/1',json=payload)
+    assert response.status_code==200,response.text
+    assert response.json()['name']=='Renamed edge' and response.json()['location']=='Berlin'
+    assert 'token' not in response.json() and 'token_cipher' not in response.json()
+    with factory() as db:assert db.get(Instance,1).token_cipher==stored
+
+
+def test_connection_change_reuses_or_rotates_token(api,monkeypatch):
+    client,factory=api;calls=[]
+    def agent(candidate,*args,**kw):
+        calls.append((candidate.agent_url,candidate.profile,main.cipher.decrypt(candidate.token_cipher.encode()).decode()))
+        return {'kind':'native'}
+    monkeypatch.setattr(main,'agent',agent)
+    payload={'name':'Edge','agent_url':'http://192.0.2.2:9101','profile':'native','allow_http':True}
+    assert client.put('/api/instances/1',json=payload).status_code==200
+    assert calls[-1][2]=='x'*48
+    assert client.put('/api/instances/1',json=payload|{'token':'new-token-'+'t'*48}).status_code==200
+    assert calls[-1][2]=='new-token-'+'t'*48
+    with factory() as db:
+        assert main.cipher.decrypt(db.get(Instance,1).token_cipher.encode()).decode()==calls[-1][2]
+    count=len(calls)
+    assert client.put('/api/instances/1',json=payload|{'token':'short'}).status_code==422
+    assert len(calls)==count
+    assert client.post('/api/instances',json=payload).status_code==422
+
+
+def test_failed_connection_change_keeps_credentials(api,monkeypatch):
+    from fastapi import HTTPException
+    client,factory=api
+    with factory() as db:stored=db.get(Instance,1).token_cipher
+    def offline(*args,**kw):raise HTTPException(502,'offline')
+    monkeypatch.setattr(main,'agent',offline)
+    payload={'name':'Edge','agent_url':'http://192.0.2.2:9101','profile':'native','allow_http':True,'token':'t'*48}
+    assert client.put('/api/instances/1',json=payload).status_code==502
+    with factory() as db:
+        i=db.get(Instance,1);assert i.token_cipher==stored and i.agent_url=='http://192.0.2.1:9101' and i.name=='Existing edge'
+
+
+def test_certificate_management_api_uses_selected_profile_and_validates_requests(api,monkeypatch):
+    client,_=api;calls=[]
+    def agent(i,path='',method='GET',body=None,timeout=10):
+        calls.append((i.id,i.profile,path,method,body))
+        return {'checked':0,'renewed':[],'errors':[]} if path.endswith('/renew') else {'ok':True}
+    monkeypatch.setattr(main,'agent',agent)
+    assert client.get('/api/instances/1/certificates/renewal-settings').status_code==200
+    assert client.put('/api/instances/1/certificates/renewal-settings',json={'schedule':'daily','daily_time':'03:15'}).status_code==200
+    assert calls[-1][:4]==(1,'native','/certificates/renewal-settings','PUT')
+    assert client.post('/api/instances/1/certificates/renew',json={'name':'cert','force':True}).status_code==200
+    assert calls[-1][-1]=={'name':'cert','force':True}
+    assert client.put('/api/instances/1/certificates/cert/policy',json={'automatic':False}).status_code==200
+    count=len(calls)
+    assert client.post('/api/instances/1/certificates/renew',json={'force':True}).status_code==422
+    assert client.put('/api/instances/1/certificates/renewal-settings',json={'daily_time':'30:00'}).status_code==422
+    assert client.post('/api/instances/1/certificates/adopt-lego',json={'name':'cert','domains':['example.com'],'email':'admin@example.com','challenge':'dns','provider':'cloudflare','source_name':'../../secret'}).status_code==422
+    assert len(calls)==count
+    assert client.post('/api/instances/1/certificates/adopt-lego',json={'name':'cert','domains':['example.com','*.example.com'],'email':'admin@example.com','challenge':'dns','provider':'cloudflare','source_name':'example.com','env_file':'/arbitrary/secret'}).status_code==200
+    assert calls[-1][2]=='/certificates/adopt-lego' and 'env_file' not in calls[-1][-1]
+    client.headers.pop('X-CSRF-Token')
+    assert client.post('/api/instances/1/certificates/renew',json={}).status_code==403
+
+@pytest.mark.parametrize('domain,cert,expected',[
+    ('app.example.com',{'domains':['*.example.com']},200),
+    ('example.com',{'domains':['*.example.com']},422),
+    ('deep.app.example.com',{'domains':['*.example.com']},422),
+    ('app.example.com',{'domains':['app.example.com'],'staging':True},422),
+    ('app.example.com',{'domains':['app.example.com'],'days_remaining':-1},422),
+])
+def test_generation_validates_selected_server_certificate_coverage(api,monkeypatch,domain,cert,expected):
+    client,_=api;calls=[]
+    def agent(i,path='',*args,**kw):
+        calls.append((i.id,path))
+        if path=='/config':return {'config':'old','hash':'a'*64}
+        if path=='/certificates':return [{'name':'site','staging':False,'days_remaining':60}|cert]
+        return {'runtime_socket_config':'/run/haproxy/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
+    monkeypatch.setattr(main,'agent',agent)
+    response=client.put('/api/instances/1/document',json={'tls_enabled':True,'hosts':[{'id':'site','domain':domain,'certificate':'site','servers':[{'address':'192.0.2.1'}]}]})
+    assert response.status_code==200,response.text
+    response=client.post('/api/instances/1/generate',json={})
+    assert response.status_code==expected,response.text
+    assert all(id==1 for id,path in calls) and (1,'/certificates') in calls
+
+
+def test_incomplete_listener_remains_editable_in_layout(api,monkeypatch):
+    client,_=api
+    monkeypatch.setattr(main,'agent',lambda *a,**kw:{'runtime_socket_config':'/run/haproxy/admin.sock','cert_dir_config':'/etc/haproxy/certs'})
+    response=client.put('/api/instances/1/document',json={'frontends':[{'name':'fe_tcp','port':3306,'mode':'tcp','backend':'missing_pool'}]})
+    assert response.status_code==200,response.text
+    response=client.get('/api/instances/1/proxy-layout')
+    assert response.status_code==200 and response.json()['error']
+    assert 'fe_tcp' in {f['name'] for f in response.json()['frontends']}
