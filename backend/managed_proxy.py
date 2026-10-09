@@ -30,6 +30,7 @@ def enhance(config,doc,cap):
     for route in doc.imported_routes:
         if route.certificate:sites.setdefault(route.frontend,[]).extend({'domain':name,'certificate':route.certificate} for name in route.hostnames)
     edited={(h.frontend,name) for h in doc.hosts for name in h.hostnames}|{(r.frontend,name) for r in doc.imported_routes for name in r.hostnames}
+    edited.update((h.frontend,name) for h in doc.imported_managed_hosts for name in h.hostnames)
     if doc.imported_config:
         from backend.haproxy_config import map_routes
         _,original_routes,_=map_routes(doc.imported_config,[m.model_dump() for m in doc.imported_maps])

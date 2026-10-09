@@ -23,10 +23,11 @@ def host_order(host):return (-len(host.path),any(name.startswith('*.') for name 
 
 def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.basic_auth import inject
+    from backend.haproxy_config import remember_document
     from backend.managed_proxy import enhance
     if doc.imported_config is not None:
         from backend.haproxy_config import generate_imported
-        return inject(enhance(generate_imported(doc),doc,capabilities),doc,basic_auth)
+        return remember_document(inject(enhance(generate_imported(doc),doc,capabilities),doc,basic_auth),doc)
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):
@@ -71,4 +72,4 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         for i, server in enumerate(host.servers):
             tls = backend_tls(server)
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
-    return inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth)
+    return remember_document(inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth),doc)

@@ -391,3 +391,38 @@ def test_reading_old_draft_exposes_original_backend_verification_without_mutatin
     assert result.json()['imported_backends'][0]['servers'][0]['tls_verify'] is False
     with factory() as db:
         assert db.get(Instance,1).document==draft and db.get(Instance,1).document_version==0
+
+
+@pytest.mark.parametrize('legacy',[False,True])
+def test_repeated_import_and_apply_keeps_created_hosts_and_live_provenance(sync_api,legacy):
+    from backend.haproxy_config import strip_document_metadata
+    c,factory,state=sync_api;doc=c.get('/api/instances/1/document').json()
+    doc['hosts']=[{'id':'wiki','frontend':'incoming','domain':'new.example.com','aliases':['www.new.example.com'],'path':'/wiki','certificate':'site','basic_auth_group':1,'servers':[{'address':'192.0.2.70','port':443,'tls':True,'tls_verify':False}]}]
+    assert c.put('/api/instances/1/document',json=doc).status_code==200
+    result,_,_=apply_generated(c);assert result.status_code==200 and result.json()['document_synced']
+    if legacy:state['active']=strip_document_metadata(state['active'])
+    for port in (8443,9443):
+        before=c.get('/api/instances/1/document').json()
+        preview=c.post('/api/instances/1/import-preview',json={});assert preview.status_code==200,preview.text
+        assert c.get('/api/instances/1/document').json()==before
+        preview=preview.json();assert preview['summary']['managed_hosts']==1
+        result=c.post('/api/instances/1/import',json={k:preview[k] for k in ('active_hash','preview_hash','document_version')})
+        assert result.status_code==200,result.text
+        imported=result.json();assert imported['hosts'][0]['id']=='wiki'
+        assert imported['hosts'][0]['certificate']=='site' and imported['hosts'][0]['basic_auth_group']==1
+        assert imported['hosts'][0]['aliases']==['www.new.example.com'] and imported['hosts'][0]['servers'][0]['tls_verify'] is False
+        imported['hosts'][0]['servers'][0]['port']=port
+        assert c.put('/api/instances/1/document',json=imported).status_code==200
+        result,generated,_=apply_generated(c);assert result.status_code==200,result.text
+        assert result.json()['document_synced'] and '192.0.2.70:'+str(port) in generated['config']
+        assert generated['config'].splitlines().count('backend backend_wiki')==1
+    with factory() as db:assert db.get(Instance,2).document_version==0
+
+
+def test_import_preview_warns_about_unapplied_edits_without_replacing_them(sync_api):
+    c,_,_=sync_api;doc=c.get('/api/instances/1/document').json()
+    doc['hosts']=[{'id':'pending','frontend':'incoming','domain':'new.example.com','servers':[{'address':'192.0.2.70'}]}]
+    saved=c.put('/api/instances/1/document',json=doc).json()
+    preview=c.post('/api/instances/1/import-preview',json={}).json()
+    assert any('Noch nicht angewendete' in w for w in preview['warnings'])
+    assert c.get('/api/instances/1/document').json()==saved

@@ -315,6 +315,8 @@ class Document(BaseModel):
     version: int = 0
     imported_config: str | None = Field(default=None,max_length=1024*1024)
     imported_active_hash: str | None = Field(default=None,pattern=r'^[a-f0-9]{64}$')
+    # Original generated hosts still present in the imported baseline.
+    imported_managed_hosts: list[Host] = Field(default_factory=list,max_length=200)
     imported_backends: list[ImportedBackend] = Field(default_factory=list,max_length=500)
     imported_routes: list[ImportedRoute] = Field(default_factory=list,max_length=2000)
     imported_route_frontends: list[str] = Field(default_factory=list,max_length=500)
@@ -336,7 +338,7 @@ class Document(BaseModel):
             for b in self.imported_backends:
                 for s in b.servers:
                     if s.tls_verify is None:s.tls_verify=policies.get((b.name,s.name),True)
-        for items in (self.hosts, self.rules, self.imported_routes):
+        for items in (self.hosts, self.rules, self.imported_routes,self.imported_managed_hosts):
             if len({x.id for x in items}) != len(items):
                 raise ValueError('IDs müssen eindeutig sein.')
         if self.imported_config is not None and not self.imported_active_hash:
@@ -364,6 +366,10 @@ class Document(BaseModel):
         if self.imported_config is not None:
             from backend.haproxy_config import parse_sections
             existing={s.name for s in parse_sections(self.imported_config)[1] if s.kind in ('frontend','backend','listen')}
+            if self.imported_managed_hosts:
+                from backend.haproxy_config import remove_original_tool_hosts
+                remove_original_tool_hosts(self.imported_config,self.imported_managed_hosts,[m.model_dump() for m in self.imported_maps])
+                existing.difference_update('backend_'+h.id for h in self.imported_managed_hosts)
         else:existing={'public_http','unknown_host','acme_webroot'}
         if existing&set(names):raise ValueError('Proxy-Name existiert bereits: '+', '.join(sorted(existing&set(names))))
         routes=[(h.frontend,name,h.path) for h in self.hosts if h.enabled for name in h.hostnames]+[(r.frontend,name,'/') for r in self.imported_routes for name in r.hostnames]

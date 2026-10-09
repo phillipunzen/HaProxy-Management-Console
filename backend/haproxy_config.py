@@ -5,12 +5,14 @@ import hashlib
 import json
 import re
 import shlex
+import zlib
 from dataclasses import dataclass, field
 
 from backend.schemas import ImportedBackend, ImportedServer, ImportedRoute, DOMAIN
 
 MAP_ROUTE = re.compile(r'^\s*use_backend\s+%\[req\.hdr\(host\),lower,map(?:_str)?\((/[^,\s)]+),([a-zA-Z0-9_.-]+)\)\]\s*(?:#.*)?$')
 MIGRATION_PREFIX = '# haproxy-control-migration '
+GRAPH_PREFIX = '# haproxy-control-document-v1 '
 
 def migration_context(config):
     lines=[line for line in config.splitlines() if line.startswith(MIGRATION_PREFIX)]
@@ -251,26 +253,40 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
     from backend.schemas import Document
     from backend.basic_auth import restore_routes
     from backend.tls_bindings import restore_document
-    backends,warnings=extract_backends(config)
+    recalled,recall_warnings=recalled_document(config,active_hash,maps,sources,map_hashes)
     proxies=inventory(config)
+    if recalled is not None:
+        return {'document':recalled.model_dump(),'proxies':proxies,'warnings':recall_warnings,
+                'summary':{'frontends':sum(p['kind'] in ('frontend','listen') for p in proxies),
+                           'backends':sum(p['kind'] in ('backend','listen') for p in proxies),
+                           'editable_backends':len(recalled.imported_backends)+len(recalled.backends)+sum(h.enabled for h in recalled.hosts),
+                           'editable_servers':sum(len(b.servers) for b in recalled.imported_backends+recalled.backends)+sum(len(h.servers) for h in recalled.hosts if h.enabled),
+                           'tcp':sum(p['mode']=='tcp' for p in proxies),'routes':len(recalled.imported_routes),'converted_maps':0,
+                           'managed_hosts':len(recalled.hosts),'restored_document':True}}
+    config=strip_document_metadata(config)
+    hosts,_=recover_tool_hosts(config,maps)
+    owned={'backend_'+h.id for h in hosts}
+    backends,warnings=extract_backends(config)
+    backends=[b for b in backends if b.name not in owned]
+    warnings=recall_warnings+warnings
     rules,routes,map_warnings=map_routes(config,maps or [])
     known={p['name'] for p in proxies if p['kind'] in ('backend','listen')}
     for route in routes:
         if route.backend not in known:warnings.append(f'{route.domain}: Backend {route.backend} fehlt in den eingelesenen Dateien.')
     for rule in rules:
         if rule['default'] and rule['default'] not in known:warnings.append(f'{rule["frontend"]}: Fallback {rule["default"]} fehlt in den eingelesenen Dateien.')
-    return {'document':restore_document(restore_routes(Document(imported_config=config,imported_active_hash=active_hash,imported_backends=backends,
+    return {'document':restore_document(restore_routes(Document(imported_config=config,imported_active_hash=active_hash,hosts=hosts,imported_managed_hosts=hosts,imported_backends=backends,
                                imported_routes=routes,imported_route_frontends=list(dict.fromkeys(r['frontend'] for r in rules)),imported_maps=maps or [],imported_sources=sources or [],
                                imported_map_hashes=map_hashes or []))).model_dump(),
             'proxies':proxies,'warnings':warnings+map_warnings,
             'summary':{'frontends':sum(p['kind'] in ('frontend','listen') for p in proxies),
                        'backends':sum(p['kind'] in ('backend','listen') for p in proxies),
-                       'editable_backends':len(backends),'editable_servers':sum(len(b.servers) for b in backends),
-                       'tcp':sum(p['mode']=='tcp' for p in proxies),'routes':len(routes),'converted_maps':sum(bool(r['path']) for r in rules)}}
+                       'editable_backends':len(backends)+len(hosts),'editable_servers':sum(len(b.servers) for b in backends)+sum(len(h.servers) for h in hosts),
+                       'tcp':sum(p['mode']=='tcp' for p in proxies),'routes':len(routes),'converted_maps':sum(bool(r['path']) for r in rules),'managed_hosts':len(hosts),'restored_document':False}}
 
 
 def generate_imported(doc):
-    original=doc.imported_config
+    original=remove_original_tool_hosts(strip_document_metadata(doc.imported_config),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
     baseline,_=extract_backends(original)
     if doc.rules:raise ValueError('Übernommene Konfiguration: allgemeine Regeln im Texteditor ergänzen.')
     if {b.name for b in doc.imported_backends}!={b.name for b in baseline}:
@@ -339,3 +355,117 @@ def generate_imported(doc):
         context={'files':[s.model_dump() for s in doc.imported_sources],'maps':[s.model_dump() for s in doc.imported_map_hashes]}
         result=result.rstrip('\r\n')+'\n'+MIGRATION_PREFIX+base64.b64encode(json.dumps(context,separators=(',',':')).encode()).decode()+'\n'
     return result
+
+
+def strip_document_metadata(config):
+    return ''.join(line for line in config.splitlines(keepends=True) if not line.startswith(GRAPH_PREFIX))
+
+
+def document_fingerprint(config):
+    # File bundles append consolidation stubs; migration hashes change on apply.
+    lines=[line for line in strip_document_metadata(config).splitlines(keepends=True)
+           if not line.startswith(MIGRATION_PREFIX) and not re.fullmatch(r'# Consolidated into /[^\r\n]+ by HAProxy Control\r?\n?',line)]
+    return hashlib.sha256(''.join(lines).rstrip('\r\n').encode()).hexdigest()
+
+
+def remember_document(config,doc):
+    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules):return strip_document_metadata(config)
+    snapshot=doc.model_dump(exclude={'version','imported_active_hash','imported_sources','imported_map_hashes'})
+    if snapshot['imported_config'] is not None:snapshot['imported_config']=strip_document_metadata(snapshot['imported_config'])
+    payload={'document':snapshot,'fingerprint':document_fingerprint(config)}
+    encoded=base64.b64encode(zlib.compress(json.dumps(payload,sort_keys=True,separators=(',',':')).encode(),9)).decode()
+    return strip_document_metadata(config).rstrip('\r\n')+'\n'+GRAPH_PREFIX+encoded+'\n'
+
+
+def recalled_document(config,active_hash,maps,sources,map_hashes):
+    from backend.schemas import Document
+    values=[line[len(GRAPH_PREFIX):] for line in config.splitlines() if line.startswith(GRAPH_PREFIX)]
+    if not values:return None,[]
+    try:
+        if len(values)!=1 or len(values[0])>1400000:raise ValueError()
+        decoder=zlib.decompressobj();raw=decoder.decompress(base64.b64decode(values[0],validate=True),4*1024*1024+1)
+        if len(raw)>4*1024*1024 or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:raise ValueError()
+        payload=json.loads(raw)
+        if not isinstance(payload,dict) or set(payload)!={'document','fingerprint'}:raise ValueError()
+        if not isinstance(payload['document'],dict) or not re.fullmatch(r'[a-f0-9]{64}',payload['fingerprint']):raise ValueError()
+        if payload['fingerprint']!=document_fingerprint(config):
+            return None,['Die Konfiguration wurde außerhalb des grafischen Entwurfs geändert. Erkennbare Tool-Hosts werden rekonstruiert; weitere Änderungen bleiben im importierten Text.']
+        value=payload['document']
+        if value.get('imported_config') is not None:
+            old_maps={m['path']:m['content'] for m in value.get('imported_maps',[])}
+            if any(m['path'] in old_maps and m['content']!=old_maps[m['path']] for m in maps or []):
+                return None,['Eine Host-Map wurde extern geändert. Die aktuellen Dateien werden eingelesen; gespeicherte Domain-Zuordnungen werden nicht darüber geschrieben.']
+            value.update(imported_active_hash=active_hash,imported_sources=sources or [],imported_map_hashes=map_hashes or [])
+        return Document.model_validate(value),[]
+    except (ValueError,TypeError,KeyError,AttributeError,RecursionError,zlib.error):
+        return None,['Die gespeicherte grafische Zuordnung ist ungültig. Die vorhandene Konfiguration wird anhand ihrer tatsächlichen Regeln eingelesen.']
+
+
+def recover_tool_hosts(config,maps=None):
+    """Recognize only complete generated host rules and owned backend pools."""
+    from backend.basic_auth import strip_managed,read_metadata
+    from backend.tls_bindings import read as tls_plans
+    from backend.schemas import Host,BackendServer
+    from backend.generator import host_acl,backend_tls,address
+    original_lines,original_sections=parse_sections(config)
+    clean=strip_managed(config);lines,sections=parse_sections(clean)
+    pools,_=extract_backends(clean);pools={p.name:p for p in pools}
+    auth=read_metadata(config) or {};plans=tls_plans(config)
+    result=[];remove=set()
+    for front in sections:
+        if front.kind not in ('frontend','listen') or front.mode!='http':continue
+        for _,rule in front.lines:
+            if len(rule)!=5 or rule[0]!='use_backend' or rule[2]!='if' or not rule[1].startswith('backend_'):continue
+            id=rule[1][8:];acl='host_'+id;path_acl='path_'+id
+            if rule[3:]!=[acl,path_acl] or not re.fullmatch(r'[a-zA-Z0-9_-]{1,40}',id):continue
+            pool=pools.get(rule[1]);section=next((s for s in sections if s.kind=='backend' and s.name==rule[1]),None)
+            if not pool or not section or pool.mode!='http' or not pool.balance:continue
+            if sum(any(re.search(r'(?<![a-zA-Z0-9_.-])'+re.escape(rule[1])+r'(?![a-zA-Z0-9_.-])',token) for token in t) for s in sections for _,t in s.lines)!=1:continue
+            if any(rule[1] in m['content'].split() for m in maps or []):continue
+            host_rules=[t for _,t in front.lines if t[:2]==['acl',acl]]
+            paths=[t for _,t in front.lines if t[:2]==['acl',path_acl]]
+            if len(paths)!=1 or len(paths[0])!=4 or paths[0][2]!='path_beg':continue
+            names=[]
+            for t in host_rules:
+                if t[2:4]==['hdr(host),field(1,:)','-i']:names+=t[4:]
+                elif t[2:6]==['hdr(host),field(1,:)','-m','end','-i']:names+=['*'+v for v in t[6:] if v.startswith('.')]
+                elif t[2:4]==['hdr_end(host),field(1,:)','-i']:names+=['*'+v for v in t[4:] if v.startswith('.')]
+            if not names:continue
+            redirect=['http-request','redirect','scheme','https','code','301','if',acl,path_acl,'!{','ssl_fc','}']
+            redirects=[t for _,t in front.lines if t==redirect or t==redirect+['!acme_challenge']]
+            if len(redirects)>1:continue
+            expected=host_rules+paths+[rule]+redirects
+            if any((acl in t or path_acl in t) and t not in expected for s in sections for _,t in s.lines):continue
+            if any(acl in t or path_acl in t for s in sections if s is not front for _,t in s.lines):continue
+            try:
+                servers=[BackendServer(**s.model_dump(exclude={'name'})) for s in pool.servers]
+                host=Host(id=id,frontend=front.name,domain=names[0],aliases=names[1:],path=paths[0][3],force_https=bool(redirects),balance=pool.balance,servers=servers)
+                generated=[shlex.split(line) for line in host_acl(host)]
+                legacy=[t[:2]+['hdr(host),field(1,:)','-m','end','-i']+t[4:] if t[2:4]==['hdr_end(host),field(1,:)','-i'] else t for t in host_rules]
+                if generated!=legacy:continue
+                expected_pool=[['balance',pool.balance]]+[['server','srv_'+str(i+1),address(s.address,s.port),'weight',str(s.weight),'check']+shlex.split(backend_tls(s)) for i,s in enumerate(servers)]
+                actual=[t for _,t in section.lines if t!=['mode','http']]
+                if actual!=expected_pool:continue
+                # Do not silently discard user comments or custom directives.
+                original_front=next(s for s in original_sections if s.kind==front.kind and s.name==front.name)
+                indexes=[i for i,t in original_front.lines if t in expected]
+                if any('#' in original_lines[i] for i in indexes):continue
+                sites=[s for s in auth.get('sites',[]) if s['kind']=='host' and s['backend']==rule[1] and s['frontend']==front.name and s['path']==host.path]
+                settings={(s['group'],s['forward']) for s in sites}
+                if len(settings)>1:continue
+                if settings:host.basic_auth_group,host.basic_auth_forward=next(iter(settings))
+                certificates={s['certificate'] for p in plans if p['frontend']==front.name for s in p['sites'] if s['domain'] in host.hostnames}
+                if len(certificates)>1:continue
+                if certificates:host.certificate=next(iter(certificates))
+                original_pool=next(s for s in original_sections if s.kind=='backend' and s.name==rule[1])
+            except (ValueError,StopIteration):continue
+            result.append(host);remove.update(indexes);remove.update(i for i in range(original_pool.start,original_pool.end) if not original_lines[i].lstrip().startswith('#') or original_lines[i].strip().startswith(('# haproxy-control-basic-auth BEGIN ','# haproxy-control-basic-auth END ')))
+    return result,remove
+
+
+def remove_original_tool_hosts(config,hosts,maps=None):
+    if not hosts:return config
+    recognized,indexes=recover_tool_hosts(config,maps)
+    expected={h.id for h in hosts}
+    if {h.id for h in recognized}!=expected:raise ValueError('Ursprüngliche Tool-Hosts wurden im Text verändert. Konfiguration erneut einlesen.')
+    return ''.join(line for index,line in enumerate(config.splitlines(keepends=True)) if index not in indexes)

@@ -113,11 +113,12 @@ def test_imported_shared_backend_is_protected_per_frontend_and_domain():
     assert regenerated.count('userlist mgmt_basic_g1')==1 and regenerated.count('http-request auth')==1
 
 
-def test_reimporting_native_path_hosts_preserves_uneditable_managed_protection():
+def test_reimporting_native_path_hosts_preserves_editable_managed_protection():
     doc=protected_doc();doc.hosts[0].path='/admin'
     config=generate(doc,CAP,{1:group()});again=Document.model_validate(import_config(config,hashlib.sha256(config.encode()).hexdigest())['document'])
     assert not again.imported_routes and auth.ids(again)=={1}
-    regenerated=generate(again,{}, {1:group()})
+    assert again.hosts[0].id=='private' and again.hosts[0].path=='/admin'
+    regenerated=generate(again,CAP, {1:group()})
     assert "http-request auth realm 'Restricted'" in regenerated and auth.read_metadata(regenerated)['sites'][0]['path']=='/admin'
 
 

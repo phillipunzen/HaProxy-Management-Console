@@ -96,3 +96,14 @@ Wenn ein importierter Backend-Pool bereits `http-request auth` verwendet, unter 
 ### Host-ACLs mit mehreren Namen
 
 Einfache zusammenhängende Paare wie `acl wiki hdr(host) -i pc-wiki.de www.pc-wiki.de` gefolgt von `use_backend be_wiki if wiki` werden als ein bearbeitbarer Eintrag mit weiteren Hostnamen übernommen. Beim Speichern gelten Backend, Website-Zugang und Zertifikatsauswahl für alle Namen. Bestehende zentrale Authentifizierungs- oder Zertifikatszuordnungen mit unterschiedlichen Einstellungen werden beim erneuten Import getrennt übernommen. Maps werden weiterhin pro Domain übernommen, sodass unabhängige Website-Einstellungen erhalten bleiben. Komplexe oder anderweitig verwendete ACLs bleiben im Texteditor.
+
+
+### Vom Tool erstellte Proxy Hosts erneut einlesen
+
+Erzeugte Konfigurationen enthalten ab dieser Version einen komprimierten Kommentar `# haproxy-control-document-v1 …` mit dem grafischen Aufbau und einem Fingerabdruck der erzeugten Konfiguration. Beim erneuten Einlesen einer unveränderten Konfiguration werden normale Proxy Hosts einschließlich IDs, zusätzlichen Hostnamen, Pfaden, Zielservern, TLS-Prüfung, Zertifikatsauswahl und Basic-Auth-Gruppen wiederhergestellt. Eigene Frontends, Backends, Regeln und deaktivierte Hosts bleiben ebenfalls Teil des grafischen Entwurfs. Es werden keine Agent-Tokens oder DNS-Zugangsdaten ergänzt. Vorhandene Textkonfigurationen bleiben im zugehörigen Import-Entwurf enthalten.
+
+Die Import-Vorschau zeigt **Tool-Proxy-Hosts wiedererkannt**. Bei älteren Konfigurationen ohne diesen Kommentar erkennt der Import vollständige `host_<ID>`-/`path_<ID>`-Regeln mit dem zugehörigen `backend_<ID>`-Pool. Diese Hosts erscheinen wieder als reguläre Proxy Hosts. Bestehende zentrale Authentifizierungs- und Zertifikatszuordnungen werden übernommen. Alte deaktivierte Einträge lassen sich aus einer Datei ohne Metadaten nicht rekonstruieren, weil sie nicht in HAProxy erzeugt wurden.
+
+Wenn Dateien oder Maps außerhalb des Tools geändert wurden, wird der gespeicherte Aufbau nicht pauschal darüber geschrieben. Erkennbare Hosts werden aus den tatsächlichen Regeln rekonstruiert; zusätzliche oder komplexe Serverregeln bleiben im Texteditor und in übernommenen Pools erhalten. Änderungen am Host nach dem Import ersetzen dessen ursprüngliche Regeln und Pool; erneutes Erzeugen legt keine Duplikate an. Die Metadaten sind Kommentare und werden von HAProxy ignoriert; für diese Wiedererkennung genügt ein Update des Management-Containers.
+
+**Einlesen & Vorschau** verändert weder den aktuellen Entwurf noch den HAProxy-Dienst. Erst **Als grafischen Entwurf übernehmen** ersetzt den Entwurf durch den eingelesenen Stand. Noch nicht angewendete Änderungen vorher anwenden oder sichern; bei abweichenden Einstellungen weist die Vorschau darauf hin.

@@ -344,3 +344,89 @@ def test_imported_plaintext_verification_change_is_rejected():
     document=doc('defaults\n mode http\nbackend app\n server web 192.0.2.1:80 check\n')
     document.imported_backends[0].servers[0].tls_verify=False
     with pytest.raises(ValueError,match='TLS-Verbindung'):generate(document,{})
+
+
+@pytest.mark.parametrize('legacy',[False,True])
+@pytest.mark.parametrize('custom_frontend',[False,True])
+def test_tool_hosts_keep_identity_auth_tls_aliases_and_are_editable_after_import(legacy,custom_frontend):
+    from backend.schemas import Host,ManagedFrontend,ManagedBackend,Rule
+    from backend.haproxy_config import strip_document_metadata,document_fingerprint,GRAPH_PREFIX
+    from backend.basic_auth import hash_password,read_metadata
+    from backend.tls_bindings import read as tls_plans
+    cap={'runtime_socket_config':'/run/haproxy/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
+    groups={1:{'id':1,'realm':'Private','users':[{'username':'alice','hash':hash_password('secret')}]}}
+    base=doc(CONFIG+EXTRA,MAPS) if custom_frontend else Document(tls_enabled=True,acme_enabled=True)
+    frontend='fe_https' if custom_frontend else 'public_http'
+    base.hosts=[Host(id='wiki',frontend=frontend,domain='pc-wiki.de',aliases=['www.pc-wiki.de','*.wiki.example.com'],path='/wiki',certificate='wiki',basic_auth_group=1,force_https=True,servers=[{'address':'origin.example.com','port':443,'tls':True,'tls_verify':False}]),Host(id='disabled',frontend=frontend,domain='disabled.example.com',enabled=False,servers=[{'address':'192.0.2.1'}])]
+    base.frontends=[ManagedFrontend(name='new_mysql',mode='tcp',port=3307,backend='new_database')]
+    base.backends=[ManagedBackend(name='new_database',mode='tcp',servers=[{'address':'192.0.2.50','port':3306}])]
+    if not custom_frontend:base.rules=[Rule(id='deny',name='Deny',value='/blocked')]
+    config=generate(base,cap,groups);value=strip_document_metadata(config) if legacy else config
+    result=import_config(value,hashlib.sha256(value.encode()).hexdigest(),MAPS if custom_frontend else [])
+    again=Document.model_validate(result['document'])
+    host=next(h for h in again.hosts if h.id=='wiki')
+    assert host.model_dump()==base.hosts[0].model_dump()
+    assert result['summary']['managed_hosts']==(1 if legacy else 2)
+    assert not any(b.name=='backend_wiki' for b in again.imported_backends)
+    regenerated=generate(again,cap,groups)
+    assert regenerated.splitlines().count('backend backend_wiki')==1
+    assert regenerated.count('use_backend backend_wiki if host_wiki path_wiki')==1
+    assert read_metadata(regenerated)['sites']==read_metadata(config)['sites']
+    assert {s['domain'] for p in tls_plans(regenerated) for s in p['sites']}==set(host.hostnames)
+    if not legacy:
+        assert again.hosts==base.hosts and again.frontends==base.frontends and again.backends==base.backends and again.rules==base.rules
+        assert document_fingerprint(regenerated)==document_fingerprint(config)
+    host.servers[0].port=8443;host.aliases=['wiki.phlene.de'];host.basic_auth_group=None;host.certificate=None
+    modified=generate(again,cap,groups)
+    assert 'origin.example.com:8443' in modified and 'hdr(host),field(1,:) -i pc-wiki.de wiki.phlene.de' in modified
+    assert not read_metadata(modified) and not tls_plans(modified)
+    again.hosts=[]
+    cleared=generate(again,cap,groups)
+    assert 'backend backend_wiki' not in cleared and not read_metadata(cleared) and not tls_plans(cleared)
+    assert len([line for line in modified.splitlines() if line.startswith(GRAPH_PREFIX)])==1
+    assert len(modified)<len(config)*2
+
+
+@pytest.mark.parametrize('change',['foreign_backend','own_backend','comment','rule'])
+def test_changed_config_uses_live_values_instead_of_saved_document(change):
+    from backend.schemas import Host
+    cap={'runtime_socket_config':'/run/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
+    base=doc(CONFIG+EXTRA,MAPS);base.hosts=[Host(id='wiki',frontend='fe_https',domain='pc-wiki.de',servers=[{'address':'192.0.2.70'}])]
+    original=generate(base,cap)
+    if change=='foreign_backend':value=original.replace('192.0.2.20:8080','192.0.2.99:8443')
+    elif change=='own_backend':value=original.replace('192.0.2.70:80','192.0.2.71:8081')
+    elif change=='comment':value=original+'# user note\n'
+    else:value=original.replace('    balance roundrobin\n    server srv_1 192.0.2.70','    http-request set-header X-Extra retained\n    balance roundrobin\n    server srv_1 192.0.2.70')
+    result=import_config(value,hashlib.sha256(value.encode()).hexdigest(),MAPS)
+    assert result['warnings'] and not result['summary']['restored_document']
+    again=Document.model_validate(result['document']);regenerated=generate(again,cap)
+    if change=='foreign_backend':assert '192.0.2.99:8443' in regenerated and again.hosts[0].id=='wiki'
+    if change=='own_backend':assert again.hosts[0].servers[0].address=='192.0.2.71' and '192.0.2.71:8081' in regenerated
+    if change=='comment':assert '# user note' in regenerated and again.hosts[0].id=='wiki'
+    if change=='rule':assert not again.hosts and 'http-request set-header X-Extra retained' in regenerated
+
+
+def test_document_metadata_handles_multifile_stubs_and_rejects_malformed_or_oversized_data():
+    import base64,zlib
+    from backend.schemas import Host
+    from backend.haproxy_config import GRAPH_PREFIX,strip_document_metadata
+    cap={'runtime_socket_config':'/run/admin.sock','cert_dir_config':'/etc/certs'}
+    config=generate(Document(hosts=[Host(id='wiki',domain='pc-wiki.de',servers=[{'address':'192.0.2.1'}])]),cap)
+    bundle=config.rstrip('\n')+'\n\n# Consolidated into /etc/haproxy/haproxy.cfg by HAProxy Control\n\n'
+    result=import_config(bundle,hashlib.sha256(config.encode()).hexdigest())
+    assert result['summary']['restored_document'] and result['document']['hosts'][0]['id']=='wiki'
+    for payload in ['invalid',base64.b64encode(zlib.compress(b'['*2000+b'0'+b']'*2000)).decode(),base64.b64encode(zlib.compress(b'x'*(4*1024*1024+1))).decode()]:
+        broken=strip_document_metadata(config)+GRAPH_PREFIX+payload+'\n'
+        result=import_config(broken,hashlib.sha256(broken.encode()).hexdigest())
+        assert result['warnings'] and result['document']['hosts'][0]['id']=='wiki'
+
+
+def test_generated_names_with_extra_references_or_options_remain_imported():
+    from backend.schemas import Host
+    from backend.haproxy_config import strip_document_metadata
+    cap={'runtime_socket_config':'/run/admin.sock','cert_dir_config':'/etc/certs'}
+    config=strip_document_metadata(generate(Document(hosts=[Host(id='wiki',domain='pc-wiki.de',servers=[{'address':'192.0.2.1'}])]),cap))
+    for modified in [config.replace('    use_backend backend_wiki','    http-request deny if host_wiki\n    use_backend backend_wiki'),config.replace(' weight 100 check',' weight 100 check inter 3s'),config.replace('    default_backend unknown_host','    use_backend %[req.hdr(host),lower,map(/etc/haproxy/other.map,backend_wiki)]\n    default_backend unknown_host')]:
+        result=import_config(modified,hashlib.sha256(modified.encode()).hexdigest())
+        assert not result['document']['hosts']
+        assert any(b['name']=='backend_wiki' for b in result['document']['imported_backends'])

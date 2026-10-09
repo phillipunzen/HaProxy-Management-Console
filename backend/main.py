@@ -244,6 +244,11 @@ def import_preview_for(i,body):
         [{'path':s['path'],'hash':s['hash']} for s in bundle['sources']],
         [{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']])
     except ValueError as error:raise HTTPException(422,str(error))
+    current=Document.model_validate(i.document).model_dump()
+    incoming=preview['document']
+    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates')
+    if any(current.get(key) for key in editable) and any(current.get(key)!=incoming.get(key) for key in editable):
+        preview['warnings'].append('Die Übernahme ersetzt den aktuellen Arbeitsentwurf durch den eingelesenen Stand. Noch nicht angewendete Änderungen vorher anwenden oder sichern; Einlesen & Vorschau allein ändert den Entwurf nicht.')
     preview['warnings']+=bundle['warnings'];preview['active_hash']=bundle['hash']
     preview['agent_update_required']=bundle.get('agent_update_required',False)
     preview['can_import']=not preview['agent_update_required']
