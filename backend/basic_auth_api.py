@@ -48,7 +48,7 @@ def router(admin,operator,audit):
 
     @api.post('/users',status_code=201)
     def create_user(body:BasicAuthUserIn,user=Depends(admin),db=Depends(get_db)):
-        if body.password is None:raise HTTPException(422,'Für einen neuen Basic-Auth-Benutzer ein Passwort mit mindestens 10 Zeichen angeben.')
+        if not body.password:raise HTTPException(422,'Für einen neuen Basic-Auth-Benutzer ein Passwort angeben.')
         try:hashed=auth.hash_password(body.password)
         except ValueError as e:raise HTTPException(422,str(e))
         auth.lock_directory(db)

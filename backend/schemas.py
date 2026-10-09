@@ -28,7 +28,7 @@ class UserIn(BaseModel):
 
 class BasicAuthUserIn(BaseModel):
     username: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,80}$')
-    password: str | None = Field(default=None,min_length=10,max_length=200)
+    password: str | None = Field(default=None,max_length=200)
     enabled: bool = True
     group_ids: list[int] = Field(default_factory=list,max_length=200)
     version: int = Field(default=0,ge=0)

@@ -54,8 +54,8 @@ def group(password=PASSWORD):return {'id':1,'realm':'Restricted','users':[{'user
 def imported_doc():return Document.model_validate(import_config(IMPORTED,hashlib.sha256(IMPORTED.encode()).hexdigest())['document'])
 
 
-@pytest.mark.parametrize('length,valid',[(9,False),(10,True),(200,True),(201,False)])
-def test_basic_password_minimum_is_ten(length,valid):
+@pytest.mark.parametrize('length,valid',[(0,True),(1,True),(9,True),(10,True),(200,True),(201,False)])
+def test_basic_password_has_no_minimum(length,valid):
     if valid:assert BasicAuthUserIn(username='a',password='a'*length)
     else:
         with pytest.raises(ValidationError):BasicAuthUserIn(username='a',password='a'*length)
@@ -188,7 +188,7 @@ def test_directory_crud_membership_and_hash_privacy(api):
 
 def test_api_validation_duplicates_and_missing_group(api):
     client,_=api;g,u=create_directory(client)
-    assert client.post('/api/basic-auth/users',json={'username':'bob','password':'a'*9}).status_code==422
+    assert client.post('/api/basic-auth/users',json={'username':'bob','password':''}).status_code==422
     assert client.post('/api/basic-auth/users',json={'username':'bob'}).status_code==422
     assert client.post('/api/basic-auth/users',json={'username':'bob','password':PASSWORD,'group_ids':[999]}).status_code==422
     assert client.post('/api/basic-auth/users',json={'username':'alice','password':PASSWORD}).status_code==409
@@ -240,3 +240,21 @@ def test_password_change_blocks_old_revision_and_marks_deployment_pending(api,mo
     assert client.put('/api/basic-auth/users/'+str(u['id']),json={**updated.json(),'enabled':False}).status_code==200
     assert client.get('/api/basic-auth').json()['instances'][0]['pending']
     with factory() as db:assert db.get(BasicAuthDeployment,1).metadata_json['groups']
+
+
+def test_api_short_password_creation_change_and_blank_update(api):
+    client,factory=api
+    created=client.post('/api/basic-auth/users',json={'username':'short','password':'x'});assert created.status_code==201,created.text
+    user=created.json()
+    with factory() as db:original=db.get(BasicAuthUser,user['id']).password_hash
+    changed=client.put('/api/basic-auth/users/'+str(user['id']),json={**user,'password':'ab'});assert changed.status_code==200,changed.text
+    with factory() as db:updated=db.get(BasicAuthUser,user['id']).password_hash
+    assert original!=updated
+    with auth.crypt_lock:
+        crypt=ctypes.CDLL(ctypes.util.find_library('crypt')).crypt;crypt.argtypes=[ctypes.c_char_p,ctypes.c_char_p];crypt.restype=ctypes.c_char_p
+        assert crypt(b'x',original.encode()).decode()==original
+        assert crypt(b'ab',updated.encode()).decode()==updated
+        assert crypt(b'x',updated.encode()).decode()!=updated
+    retained=client.put('/api/basic-auth/users/'+str(user['id']),json={**changed.json(),'password':''});assert retained.status_code==200,retained.text
+    with factory() as db:assert db.get(BasicAuthUser,user['id']).password_hash==updated
+    assert client.post('/api/basic-auth/users',json={'username':'missing','password':None}).status_code==422

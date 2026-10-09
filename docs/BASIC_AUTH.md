@@ -5,7 +5,7 @@ Unter **Basic Auth** verwaltest du Website-Benutzer und Benutzergruppen zentral 
 ## Website schützen
 
 1. Als Administrator **Basic Auth → Gruppen → Gruppe hinzufügen** öffnen, z. B. „Intern“. Der **Realm** ist der Text im Browser-Anmeldedialog. Er erlaubt Buchstaben A–Z, Zahlen, Leerzeichen und `. : @ / _ -`.
-2. Unter **Benutzer → Benutzer hinzufügen** Benutzername und Passwort mit **mindestens 10 Zeichen** vergeben und die gewünschte Gruppe auswählen. Benutzer ohne Gruppe erhalten keinen Site-Zugriff.
+2. Unter **Benutzer → Benutzer hinzufügen** Benutzername und Passwort vergeben (ohne Mindestlänge; auch kurze Passwörter sind möglich) und die gewünschte Gruppe auswählen. Benutzer ohne Gruppe erhalten keinen Site-Zugriff.
 3. Die HAProxy-Instanz unter **Proxy Hosts** auswählen und die Website bearbeiten. Unter **Website-Zugang** die Gruppe auswählen und **Im Entwurf speichern** drücken. Bei importierten Konfigurationen unter **Übernommene Domain-Zuordnungen** den Einstellungsbutton neben der gewünschten Domain anklicken. Der Dialog **Domain-Zuordnung bearbeiten** zeigt den Zielserver und die Auswahl **Website-Zugang**; dort die Gruppe mit den gewünschten Benutzern zuweisen. Die aktuelle Zuordnung steht auch in der Spalte **Website-Zugang**.
 4. **Konfiguration erzeugen** wählen. Im Konfigurationseditor vergleichen und **Prüfen & anwenden** ausführen. Der Agent prüft die Konfiguration mit dem HAProxy des Zielhosts und führt einen Reload aus.
 
