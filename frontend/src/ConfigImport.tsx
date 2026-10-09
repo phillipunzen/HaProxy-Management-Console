@@ -89,8 +89,8 @@ export function ImportedBackendForm({initial,busy,onClose,onSave}:{initial:Impor
     {error&&<div ref={errorRef} role="alert" className="notice error">{error}</div>}
     <fieldset className="imported-form-fields" disabled={busy}>
       <div className="field"><label htmlFor="imported-balance">Verteilung</label><select id="imported-balance" value={backend.balance||''} onChange={e=>setBackend({...backend,balance:e.target.value||null})}>
-        {!backend.balance&&<option value="">Vorhandenen Algorithmus behalten</option>}<option value="roundrobin">Round Robin</option><option value="leastconn">Least Connections</option><option value="source">Source</option>
-      </select></div>
+        {!backend.balance&&<option value="">Vorhandenen Algorithmus behalten</option>}<option value="roundrobin">Round Robin</option><option value="leastconn">Least Connections</option><option value="source">Source</option><option value="first">First</option>
+      </select>{backend.balance==='first'&&<small>First bevorzugt verfügbare Server nach aufsteigender Server-ID (standardmäßig Listenreihenfolge). Gewichte werden ignoriert. Mit maxconn pro Zielserver wechselt HAProxy bei voller Auslastung zum nächsten Server; bestehende Werte bleiben erhalten. maxconn im Konfigurationseditor setzen.</small>}</div>
       {backend.servers.map((s,i)=><div className="form-grid imported-server-edit" key={s.name}>
         <strong>{s.name}{s.tls?' · TLS':''}</strong>
         {(['address','port','weight'] as const).map(key=><div className="field" key={key}><label htmlFor={`import-${i}-${key}`}>{key==='address'?'Zieladresse':key==='port'?'Port':'Gewicht'}</label><input id={`import-${i}-${key}`} required type={key==='address'?'text':'number'} min={key==='port'?1:0} max={key==='port'?65535:256} value={s[key]} onChange={e=>setBackend({...backend,servers:backend.servers.map((sv,j)=>i===j?{...sv,[key]:key==='address'?e.target.value:Number(e.target.value)}:sv)})}/></div>)}

@@ -105,6 +105,28 @@ def test_backend_edit_changes_only_address_weight_and_algorithm():
     assert 'backend be_app\n    balance leastconn' in result
     assert CONFIG in result
 
+
+@pytest.mark.parametrize('mode',['http','tcp'])
+@pytest.mark.parametrize('initial',[None,'roundrobin','first'])
+@pytest.mark.parametrize('ending',['\n','\r\n'])
+def test_first_import_and_edit_preserve_server_priority_limits_and_checks(mode,initial,ending):
+    balance='' if initial is None else f'    balance {initial} # distribution\n'
+    original=(f'defaults\n    mode {mode}\nfrontend incoming\n    bind :8080\n    default_backend web\n'
+              f'backend web\n{balance}    server secondary 192.0.2.1:80 id 20 maxconn 2 weight 256 check inter 2s # secondary\n'
+              '    server primary 192.0.2.2:80 id 10 maxconn 1 weight 1 check backup\n').replace('\n',ending)
+    document=doc(original)
+    assert generate(document,{})==original
+    pool=document.imported_backends[0]
+    assert pool.balance==(initial or 'roundrobin')
+    pool.balance='first'
+    updated=generate(document,{})
+    expected=(original.replace('balance '+initial,'balance first') if initial is not None
+              else original.replace(ending+'backend web'+ending,ending+'backend web'+ending+'    balance first'+ending))
+    assert updated==expected
+    restored=doc(updated)
+    assert restored.imported_backends[0].balance=='first'
+    assert generate(restored,{})==updated
+
 @pytest.mark.parametrize('content',['app.example.com be_app\napp.example.com be_default\n','*.example.com be_app\n','App.example.com be_app\n','app.example.com be_app extra\n'])
 def test_unsupported_map_is_preserved(content):
     document=doc(CONFIG+EXTRA,[{'path':MAPS[0]['path'],'content':content}])
@@ -120,7 +142,8 @@ def test_missing_map_and_backends_are_reported_without_inventing_targets():
     assert not any(b['name']=='be_app' for b in result['document']['imported_backends'])
 
 
-def test_inherited_defaults_are_used_and_reset():
+@pytest.mark.parametrize('algorithm',['leastconn','first'])
+def test_inherited_defaults_are_used_and_reset(algorithm):
     config='''defaults shared
  mode http
  balance leastconn
@@ -134,9 +157,9 @@ defaults other
  mode tcp
 backend plain
  server db 192.0.2.1:1234 check
-'''
+'''.replace('balance leastconn','balance '+algorithm)
     pools,_=extract_backends(config)
-    assert pools[0].balance=='leastconn' and pools[0].servers[0].weight==30 and pools[0].servers[0].tls
+    assert pools[0].balance==algorithm and pools[0].servers[0].weight==30 and pools[0].servers[0].tls
     assert pools[1].mode=='tcp' and pools[1].servers[0].weight==1 and not pools[1].servers[0].tls
     assert generate(doc(config),{})==config
 
@@ -348,7 +371,8 @@ def test_imported_plaintext_verification_change_is_rejected():
 
 @pytest.mark.parametrize('legacy',[False,True])
 @pytest.mark.parametrize('custom_frontend',[False,True])
-def test_tool_hosts_keep_identity_auth_tls_aliases_and_are_editable_after_import(legacy,custom_frontend):
+@pytest.mark.parametrize('balance',['roundrobin','first'])
+def test_tool_hosts_keep_identity_auth_tls_aliases_and_are_editable_after_import(legacy,custom_frontend,balance):
     from backend.schemas import Host,ManagedFrontend,ManagedBackend,Rule
     from backend.haproxy_config import strip_document_metadata,document_fingerprint,GRAPH_PREFIX
     from backend.basic_auth import hash_password,read_metadata
@@ -361,6 +385,7 @@ def test_tool_hosts_keep_identity_auth_tls_aliases_and_are_editable_after_import
     base.frontends=[ManagedFrontend(name='new_mysql',mode='tcp',port=3307,backend='new_database')]
     base.backends=[ManagedBackend(name='new_database',mode='tcp',servers=[{'address':'192.0.2.50','port':3306}])]
     if not custom_frontend:base.rules=[Rule(id='deny',name='Deny',value='/blocked')]
+    base.hosts[0].balance=balance
     config=generate(base,cap,groups);value=strip_document_metadata(config) if legacy else config
     result=import_config(value,hashlib.sha256(value.encode()).hexdigest(),MAPS if custom_frontend else [])
     again=Document.model_validate(result['document'])

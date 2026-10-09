@@ -54,6 +54,24 @@ def test_tcp_frontend_and_backend_are_generated_as_a_pair():
     assert meta['fe_mysql']['routes']==[{'backend':'be_mysql','default':True}]
 
 
+@pytest.mark.parametrize('kind',['host','http_pool','tcp_pool'])
+def test_first_distribution_survives_generation_and_document_reimport(kind):
+    servers=[BackendServer(address='192.0.2.1',weight=1),BackendServer(address='192.0.2.2',weight=256)]
+    if kind=='host':
+        original=Document(hosts=[Host(id='app',domain='app.example.com',aliases=['www.example.com'],balance='first',servers=servers)])
+        name='backend_app'
+    else:
+        original=Document(backends=[ManagedBackend(name='web',mode='tcp' if kind=='tcp_pool' else 'http',balance='first',servers=servers)])
+        name='web'
+    config=generate(original,CAP)
+    section=config.split('backend '+name+'\n')[1]
+    assert '    balance first\n' in section
+    assert section.index('server srv_1 192.0.2.1:80')<section.index('server srv_2 192.0.2.2:80')
+    restored=Document.model_validate(import_config(config,'a'*64)['document'])
+    assert restored.hosts==original.hosts and restored.backends==original.backends
+    assert '    balance first\n' in generate(restored,CAP)
+
+
 def test_custom_http_frontend_automatically_routes_host_to_its_pool():
     doc=Document(frontends=[ManagedFrontend(name='fe_apps',mode='http',port=8081)],hosts=[host(frontend='fe_apps')])
     config=generate(doc,CAP)

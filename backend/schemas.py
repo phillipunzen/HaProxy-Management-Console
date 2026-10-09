@@ -190,7 +190,7 @@ class Host(BaseModel):
     force_https: bool = False
     frontend: str = Field(default='public_http',pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     certificate: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
-    balance: Literal['roundrobin', 'leastconn', 'source'] = 'roundrobin'
+    balance: Literal['roundrobin', 'leastconn', 'source', 'first'] = 'roundrobin'
     servers: list[BackendServer] = Field(min_length=1, max_length=30)
     basic_auth_group: int | None = Field(default=None,ge=1)
     basic_auth_forward: bool = False
@@ -274,7 +274,7 @@ class ImportedBackend(BaseModel):
 
     name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     mode: Literal['http','tcp','unknown']
-    balance: Literal['roundrobin','leastconn','source'] | None = 'roundrobin'
+    balance: Literal['roundrobin','leastconn','source','first'] | None = 'roundrobin'
     servers: list[ImportedServer] = Field(max_length=500)
 
 class ImportedRoute(BaseModel):
@@ -341,7 +341,7 @@ class ManagedBackend(BaseModel):
 
     name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     mode: Literal['http','tcp'] = 'http'
-    balance: Literal['roundrobin','leastconn','source'] = 'roundrobin'
+    balance: Literal['roundrobin','leastconn','source','first'] = 'roundrobin'
     servers: list[BackendServer] = Field(min_length=1,max_length=100)
 
 class ManagedFrontend(BaseModel):

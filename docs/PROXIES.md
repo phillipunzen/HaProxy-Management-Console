@@ -16,6 +16,14 @@ Das Feld gibt es auch beim Bearbeiten einer **übernommenen Domain-Zuordnung**. 
 
 Das ausgewählte Produktionszertifikat muss alle Namen abdecken. Bei der Zertifikatsanforderung schlägt **Umfang → Alle Sites dieses Servers gemeinsam** auch zusätzliche Namen vor. DNS-Einträge für jeden Namen müssen auf den HAProxy zeigen. Bei bereits separat importierten Einträgen zuerst die zusätzliche Domain-Zuordnung entfernen und den Namen am gemeinsamen Eintrag hinterlegen; unterschiedliche Zugangsregeln oder Zertifikate bleiben beim Import als getrennte Einträge erhalten.
 
+## Lastverteilung „First“
+
+**First** ist unter **Proxy Hosts → Bearbeiten → Lastverteilung**, beim Anlegen/Bearbeiten eigener HTTP-/TCP-Backend-Pools und bei übernommenen Backend-Pools auswählbar. Die Auswahl erzeugt `balance first` und bleibt beim erneuten Einlesen erhalten, einschließlich der Zuordnung selbst angelegter Proxy Hosts.
+
+HAProxy nimmt den verfügbaren Zielserver mit der niedrigsten numerischen Server-ID. Ohne explizite `id` entspricht das der Reihenfolge der Server im Pool. Gewichte werden ignoriert. Mit `maxconn` pro Server werden bei erreichter Verbindungsgrenze weitere Verbindungen an den nächsten verfügbaren Server geleitet. Ohne Grenze bleibt der erste verfügbare Server bevorzugt. Bestehende `id`, `maxconn`, Backup- und Healthcheck-Optionen bleiben beim Bearbeiten importierter Pools erhalten. Zusätzliche Serveroptionen wie `maxconn` können im Konfigurationseditor an der jeweiligen `server`-Zeile gesetzt werden. Siehe [HAProxy-Dokumentation zu `balance first`](https://docs.haproxy.org/3.2/configuration.html#4.2-balance).
+
+Nach Speichern **Prüfen & anwenden** verwenden, um die Lastverteilung auf dem gewählten Server zu aktivieren.
+
 ## Änderungen anwenden
 
 Unter **Proxy Hosts**, **Frontends & Backends** und **Regeln** führt **Prüfen & anwenden** nach Bestätigung den ganzen Ablauf für den angezeigten Server aus: Konfiguration erzeugen, HAProxy-Prüfung, Version und vorherige Konfiguration sichern, anwenden und Reload bestätigen. Die Ansicht wird anschließend automatisch aktualisiert. Zum vorherigen Vergleich weiterhin **Konfiguration erzeugen** verwenden und im Konfigurationseditor prüfen und anwenden.

@@ -140,7 +140,7 @@ def parse_sections(config):
                 global_verify=tokens[1]!='none';inherited['server_verify']=global_verify
             if tokens[0]=='mode' and len(tokens)==2:
                 section.mode=tokens[1]
-            if tokens[0]=='balance':section.balance=tokens[1] if len(tokens)==2 and tokens[1] in ('roundrobin','leastconn','source') else None
+            if tokens[0]=='balance':section.balance=tokens[1] if len(tokens)==2 and tokens[1] in ('roundrobin','leastconn','source','first') else None
             if tokens[0]=='default-server':
                 if 'weight' in tokens:
                     try:section.default_weight=int(tokens[tokens.index('weight')+1])
