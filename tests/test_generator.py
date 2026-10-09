@@ -72,7 +72,11 @@ def imported_with_tls():
 def test_imported_reverseproxy_addition_retains_existing_tls_and_tcp():
     doc=imported_with_tls();doc.hosts=[host(frontend='fe_https',certificate='app-cert',basic_auth_group=1)]
     config=generate(doc,CAP,{1:{'id':1,'realm':'Private','users':[]}})
-    assert 'crt /etc/haproxy/certs/cert.pem' in config and 'crt /etc/haproxy/certs/app-cert.pem' in config
+    from backend.tls_bindings import read
+    plan=read(config)[0]
+    assert plan['fallback']==['/etc/haproxy/certs/cert.pem']
+    assert plan['sites']==[{'domain':'app.example.com','certificate':'app-cert'}]
+    assert 'ssl alpn h2,http/1.1 crt-list '+plan['path'] in config
     assert 'http-request set-header X-Forwarded-Proto https' in config
     assert 'server db 192.0.2.235:3306 check' in config
     assert config.index('use_backend backend_app')<config.index('default_backend be_old')
@@ -89,8 +93,9 @@ def test_explicit_frontend_certificate_selection_replaces_old_binding():
 
 def test_directory_bind_does_not_load_site_certificate_twice():
     config=generate(Document(tls_enabled=True,hosts=[host(certificate='app-cert')]),CAP)
-    assert 'ssl crt /etc/haproxy/certs/' in config
-    assert 'crt /etc/haproxy/certs/app-cert.pem' not in config
+    from backend.tls_bindings import read
+    assert 'crt-list /etc/haproxy/certs/.control-tls/' in config
+    assert read(config)[0]['fallback']==['/etc/haproxy/certs/']
 
 
 def test_listener_port_conflicts_and_backend_mode_mismatch_are_rejected():

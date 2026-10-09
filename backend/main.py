@@ -452,6 +452,9 @@ def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
     current=agent(i,'/config')
     try:
         doc=Document.model_validate(i.document)
+        from backend.tls_bindings import read as tls_plans
+        if (any(h.enabled and h.certificate for h in doc.hosts) or any(r.certificate for r in doc.imported_routes) or tls_plans(doc.imported_config or '')) and not cap.get('tls_site_bindings'):
+            raise ValueError('Für die gezielte Zertifikatsauswahl am Reverseproxy den Agenten auf dem HAProxy-Server unter Server aktualisieren. Danach Konfiguration erneut erzeugen.')
         if doc.imported_config is not None:
             if doc.imported_active_hash!=current['hash']:raise HTTPException(409,'Konfiguration seit dem Import geändert. Erneut importieren, damit externe Änderungen erhalten bleiben.')
             if doc.imported_sources:

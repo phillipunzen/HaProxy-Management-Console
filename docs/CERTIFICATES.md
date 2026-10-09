@@ -112,3 +112,9 @@ Beim Proxy Host bzw. der übernommenen Domain-Zuordnung lässt sich ein Produkti
 HAProxy wählt beim TLS-Verbindungsaufbau per SNI aus den geladenen Zertifikaten. Zertifikate sind an Domains/Listener gebunden, nicht an URL-Pfade. Für getrennte Zertifikate pro Domain sollten die SAN-Listen nicht überlappen. Der Generator prüft, ob gewählte Zertifikate auf dem Zielserver vorhanden, gültig und für die ausgewählte Domain passend sind. Danach **Konfiguration erzeugen → Prüfen → Anwenden**.
 
 Referenzen: [LEGO v5-Befehle](https://go-acme.github.io/lego/references/ref-flags/), [Cloudflare mit LEGO](https://go-acme.github.io/lego/dns/cloudflare/), [Hetzner mit LEGO](https://go-acme.github.io/lego/dns/hetzner/), [Hetzner Cloud-DNS](https://docs.hetzner.com/networking/dns/migration-to-hetzner-console/features-and-differences/), [Certbot-Erneuerung](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates), [HAProxy TLS und SNI](https://www.haproxy.com/documentation/haproxy-configuration-tutorials/security/ssl-tls/basics-enable-tls/).
+
+## Auswahl pro Reverseproxy statt nur am Frontend
+
+Die Auswahl **Zertifikat für HTTPS** am Reverseproxy bzw. der importierten Domain-Zuordnung hat Vorrang für diese Domain. Eine zusätzliche Zuweisung am Frontend ist nicht nötig. Das Frontend muss TLS aktiviert haben. Auch bei überlappenden SANs oder Wildcards verwendet der Dienst das gewählte Zertifikat für die zugewiesene Domain; andere Domains behalten ihre Frontend-Zertifikate. **Konfiguration erzeugen → Prüfen & anwenden** aktiviert die Auswahl.
+
+Management-Container und HAProxy-Agent aktualisieren; unter **Server** ist der Agent-Update-Befehl verfügbar. Der Agent erstellt die benötigten SNI-Listen unter `.control-tls` im Zertifikatsverzeichnis und berücksichtigt sie bei Prüfung, Reload, Rollback und Zertifikatserneuerung. Beim erneuten Import bleibt die Auswahl erhalten. Einzelheiten: [PROXIES.md](PROXIES.md).

@@ -182,13 +182,32 @@ def test_generation_validates_selected_server_certificate_coverage(api,monkeypat
         calls.append((i.id,path))
         if path=='/config':return {'config':'old','hash':'a'*64}
         if path=='/certificates':return [{'name':'site','staging':False,'days_remaining':60}|cert]
-        return {'runtime_socket_config':'/run/haproxy/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
+        return {'tls_site_bindings':True,'runtime_socket_config':'/run/haproxy/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
     monkeypatch.setattr(main,'agent',agent)
     response=client.put('/api/instances/1/document',json={'tls_enabled':True,'hosts':[{'id':'site','domain':domain,'certificate':'site','servers':[{'address':'192.0.2.1'}]}]})
     assert response.status_code==200,response.text
     response=client.post('/api/instances/1/generate',json={})
     assert response.status_code==expected,response.text
     assert all(id==1 for id,path in calls) and (1,'/certificates') in calls
+
+
+@pytest.mark.parametrize('supported',[False,True])
+def test_site_certificate_generation_requires_updated_agent_and_has_domain_filter(api,monkeypatch,supported):
+    client,_=api
+    def agent(i,path='',*args,**kwargs):
+        if path=='/config':return {'config':'old','hash':'a'*64}
+        if path=='/certificates':return [{'name':'site','domains':['*.example.com'],'staging':False,'days_remaining':30}]
+        return {'tls_site_bindings':supported,'runtime_socket_config':'/run/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
+    monkeypatch.setattr(main,'agent',agent)
+    value={'tls_enabled':True,'hosts':[{'id':'site','domain':'app.example.com','certificate':'site','servers':[{'address':'192.0.2.1'}]}]}
+    assert client.put('/api/instances/1/document',json=value).status_code==200
+    result=client.post('/api/instances/1/generate',json={})
+    if supported:
+        from backend.tls_bindings import read
+        assert result.status_code==200,result.text
+        assert read(result.json()['config'])[0]['sites']==[{'domain':'app.example.com','certificate':'site'}]
+    else:
+        assert result.status_code==422 and 'Agenten' in result.json()['detail']
 
 
 def test_incomplete_listener_remains_editable_in_layout(api,monkeypatch):

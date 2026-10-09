@@ -26,6 +26,7 @@ from backend.schemas import CertificateIn,CertificateAdoptIn,CertificateRenewIn,
 from agent import certificates as certificate_jobs
 from backend.haproxy_config import migration_context
 from agent.config_bundle import read_bundle
+from agent.tls_bindings import materialize as tls_files
 
 CONFIG_PATH = Path(os.environ.get('AGENT_CONFIG', '/etc/haproxy-control/agent.json'))
 PROFILES = {}
@@ -129,6 +130,10 @@ def info(p):
 
 
 def validate(p, config):
+    with tls_files(p,config,atomic):return validate_config(p,config)
+
+
+def validate_config(p, config):
     current=Path(p['config_path'])
     fd,tmp=tempfile.mkstemp(prefix='.control-check-',suffix='.cfg',dir=current.parent)
     try:
@@ -232,8 +237,10 @@ def install_pem(p,name,pem,staging=False):
     atomic(target,pem,mode,uid,gid)
     try:
         if not staging:
-            validate(p,Path(p['config_path']).read_text())
-            reload_service(p)
+            config=Path(p['config_path']).read_text()
+            with tls_files(p,config,atomic,persist=True):
+                validate(p,config)
+                reload_service(p)
     except Exception as exc:
         if old is None: target.unlink(missing_ok=True)
         else: atomic(target,old,mode,uid,gid)
@@ -318,7 +325,7 @@ def capabilities(profile: str,p=Depends(auth)):
         'dns_providers':['cloudflare','hetzner'], 'http_challenge':bool(p.get('acme_webroot')),
         'dns_credentials_ui':True,'dns_credentials':certificate_jobs.credentials_public(p),
         'lego_adoption':bool(p.get('lego')),'lego_host_credentials':bool(p.get('lego',{}).get('env_file')),
-        'automatic_renewal':True,'certificate_management':True,'acme_engines':['certbot']+(['lego'] if certificate_jobs.lego_ready(p) else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
+        'automatic_renewal':True,'certificate_management':True,'tls_site_bindings':True,'acme_engines':['certbot']+(['lego'] if certificate_jobs.lego_ready(p) else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
 
 @app.get('/profiles/{profile}/config-bundle')
 def config_bundle(profile: str,p=Depends(auth)):
@@ -346,20 +353,21 @@ def apply(profile: str,body: ConfigIn,p=Depends(auth)):
     with lock(p):
         target=Path(p['config_path']);old=target.read_bytes().decode();st=target.stat()
         if sha(old)!=body.expected_hash: raise HTTPException(409,'Konfiguration wurde extern geändert. Neu laden und Änderungen abgleichen.')
-        output=validate(p,body.config)
-        # Read the runtime socket before overwriting the active configuration.
-        try: info(p)
-        except OSError: raise HTTPException(502,'Runtime-Socket ist nicht erreichbar; keine Änderung vorgenommen.')
-        backup=STATE_DIR/'backups'/sha(p['config_path'])/(str(time.time_ns())+'.cfg')
-        atomic(backup,old.encode(),0o600)
-        atomic(target,body.config.encode(),st.st_mode & 0o777,st.st_uid,st.st_gid)
-        try: current=reload_service(p)
-        except Exception as error:
-            atomic(target,old.encode(),st.st_mode & 0o777,st.st_uid,st.st_gid)
-            try: reload_service(p)
-            except Exception: raise HTTPException(502,'Reload und Wiederherstellung des Dienstes fehlgeschlagen. Alte Datei wiederhergestellt; Server prüfen.')
-            raise HTTPException(502,'Reload fehlgeschlagen; vorherige Konfiguration und Dienst wiederhergestellt.') from error
-        return {'applied':True,'hash':sha(body.config),'output':output,'pid':current['Pid']}
+        with tls_files(p,body.config,atomic,persist=True):
+            output=validate(p,body.config)
+            # Read the runtime socket before overwriting the active configuration.
+            try: info(p)
+            except OSError: raise HTTPException(502,'Runtime-Socket ist nicht erreichbar; keine Änderung vorgenommen.')
+            backup=STATE_DIR/'backups'/sha(p['config_path'])/(str(time.time_ns())+'.cfg')
+            atomic(backup,old.encode(),0o600)
+            atomic(target,body.config.encode(),st.st_mode & 0o777,st.st_uid,st.st_gid)
+            try: current=reload_service(p)
+            except Exception as error:
+                atomic(target,old.encode(),st.st_mode & 0o777,st.st_uid,st.st_gid)
+                try: reload_service(p)
+                except Exception: raise HTTPException(502,'Reload und Wiederherstellung des Dienstes fehlgeschlagen. Alte Datei wiederhergestellt; Server prüfen.')
+                raise HTTPException(502,'Reload fehlgeschlagen; vorherige Konfiguration und Dienst wiederhergestellt.') from error
+            return {'applied':True,'hash':sha(body.config),'output':output,'pid':current['Pid']}
 
 def apply_migration(p,body,context):
     with lock(p):
@@ -371,36 +379,37 @@ def apply_migration(p,body,context):
         actual_maps={item['host_path']:item['hash'] for item in bundle['maps']}
         if actual_maps!={item['path']:item['hash'] for item in context['maps']}:
             raise HTTPException(409,'Eine Map-Datei wurde geändert. Erneut importieren und vergleichen.')
-        output=validate(p,body.config)
-        try:info(p)
-        except OSError:raise HTTPException(502,'Runtime-Socket nicht erreichbar; keine Migration vorgenommen.')
-        backup=STATE_DIR/'backups'/sha(p['config_path'])/str(time.time_ns())
-        atomic(backup/'bundle.json',json.dumps(bundle).encode(),0o600)
-        old=[]
-        for source in bundle['sources']:
-            path=Path(source['path']);attributes=path.stat()
-            old.append((path,source['content'],attributes))
-        def write(path,content,attributes):atomic(path,content.encode(),attributes.st_mode & 0o777,attributes.st_uid,attributes.st_gid)
-        try:
-            for path,content,attributes in old:
-                value=body.config if str(path)==p['config_path'] else '# Consolidated into '+p['config_path']+' by HAProxy Control\n'
-                write(path,value,attributes)
-            current=reload_service(p)
-        except Exception as error:
-            restore_errors=[]
-            for path,content,attributes in old:
-                try:write(path,content,attributes)
-                except OSError:restore_errors.append(str(path))
-            if restore_errors:
-                logger.error('Migration file restore failed: %s',restore_errors)
-                raise HTTPException(502,'Wiederherstellung einzelner Dateien fehlgeschlagen; Agent-Sicherung und HAProxy-Dienst prüfen.') from error
-            try:reload_service(p)
-            except Exception:raise HTTPException(502,'Originaldateien wiederhergestellt; HAProxy-Dienst prüfen.') from error
-            raise HTTPException(502,'Migration fehlgeschlagen; alle Originaldateien und Dienst wiederhergestellt.') from error
-        after=read_bundle(p,run,sha)
-        return {'applied':True,'hash':sha(body.config),'output':output,'pid':current['Pid'],
-                'sources':[{'path':s['path'],'hash':s['hash']} for s in after['sources']],
-                'map_hashes':[{'path':m['host_path'],'hash':m['hash']} for m in after['maps']]}
+        with tls_files(p,body.config,atomic,persist=True):
+            output=validate(p,body.config)
+            try:info(p)
+            except OSError:raise HTTPException(502,'Runtime-Socket nicht erreichbar; keine Migration vorgenommen.')
+            backup=STATE_DIR/'backups'/sha(p['config_path'])/str(time.time_ns())
+            atomic(backup/'bundle.json',json.dumps(bundle).encode(),0o600)
+            old=[]
+            for source in bundle['sources']:
+                path=Path(source['path']);attributes=path.stat()
+                old.append((path,source['content'],attributes))
+            def write(path,content,attributes):atomic(path,content.encode(),attributes.st_mode & 0o777,attributes.st_uid,attributes.st_gid)
+            try:
+                for path,content,attributes in old:
+                    value=body.config if str(path)==p['config_path'] else '# Consolidated into '+p['config_path']+' by HAProxy Control\n'
+                    write(path,value,attributes)
+                current=reload_service(p)
+            except Exception as error:
+                restore_errors=[]
+                for path,content,attributes in old:
+                    try:write(path,content,attributes)
+                    except OSError:restore_errors.append(str(path))
+                if restore_errors:
+                    logger.error('Migration file restore failed: %s',restore_errors)
+                    raise HTTPException(502,'Wiederherstellung einzelner Dateien fehlgeschlagen; Agent-Sicherung und HAProxy-Dienst prüfen.') from error
+                try:reload_service(p)
+                except Exception:raise HTTPException(502,'Originaldateien wiederhergestellt; HAProxy-Dienst prüfen.') from error
+                raise HTTPException(502,'Migration fehlgeschlagen; alle Originaldateien und Dienst wiederhergestellt.') from error
+            after=read_bundle(p,run,sha)
+            return {'applied':True,'hash':sha(body.config),'output':output,'pid':current['Pid'],
+                    'sources':[{'path':s['path'],'hash':s['hash']} for s in after['sources']],
+                    'map_hashes':[{'path':m['host_path'],'hash':m['hash']} for m in after['maps']]}
 
 @app.post('/profiles/{profile}/service/{action}')
 def service(profile: str,action: str,p=Depends(auth)):

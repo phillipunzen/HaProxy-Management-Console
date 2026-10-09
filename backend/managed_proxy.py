@@ -1,6 +1,8 @@
 """Extend generated or imported configurations with explicit listeners and pools."""
 import re
+from pathlib import PurePosixPath
 from backend.haproxy_config import parse_sections
+from backend import tls_bindings
 
 
 def endpoint(host,port):return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
@@ -20,11 +22,29 @@ def backend(name,mode,balance,values):
 
 
 def enhance(config,doc,cap):
+    old=tls_bindings.read(config)
+    config=tls_bindings.restore(config)
+    sites={}
+    for host in doc.hosts:
+        if host.enabled and host.certificate:sites.setdefault(host.frontend,[]).append({'domain':host.domain,'certificate':host.certificate})
+    for route in doc.imported_routes:
+        if route.certificate:sites.setdefault(route.frontend,[]).append({'domain':route.domain,'certificate':route.certificate})
+    edited={(h.frontend,h.domain) for h in doc.hosts}|{(r.frontend,r.domain) for r in doc.imported_routes}
+    for plan in old:
+        for site in plan['sites']:
+            if (plan['frontend'],site['domain']) not in edited:sites.setdefault(plan['frontend'],[]).append(site)
+    for name,values in sites.items():
+        unique={}
+        for site in values:
+            if site['domain'] in unique and unique[site['domain']]!=site['certificate']:raise ValueError('Eine Domain kann am selben TLS-Frontend nur ein Zertifikat verwenden, auch bei verschiedenen Pfaden: '+site['domain'])
+            unique[site['domain']]=site['certificate']
+        sites[name]=[{'domain':domain,'certificate':cert} for domain,cert in sorted(unique.items())]
     certificates={name:list(values) for name,values in doc.frontend_certificates.items() if values}
     for route in doc.imported_routes:
         if route.certificate:certificates.setdefault(route.frontend,[]).append(route.certificate)
     for host in doc.hosts:
         if host.enabled and host.certificate:certificates.setdefault(host.frontend,[]).append(host.certificate)
+    for name,values in sites.items():certificates.setdefault(name,[]).extend(site['certificate'] for site in values)
     extra_hosts=[h for h in doc.hosts if h.enabled and (doc.imported_config is not None or h.frontend!='public_http')]
     if not doc.frontends and not doc.backends and not extra_hosts and not certificates:return config
     cert_dir=cap.get('cert_dir_config','')
@@ -87,6 +107,7 @@ def enhance(config,doc,cap):
         entries+=[f'    use_backend backend_{host.id} if host_{host.id} path_{host.id}']
         index=next((i for i,t in front.lines if t[0] in ('use_backend','default_backend')),front.end)
         insert.setdefault(index,[]).extend(entries)
+    plans=[]
     for name,values in certificates.items():
         front=frontends.get(name)
         if not front:raise ValueError('Zertifikats-Frontend fehlt: '+name)
@@ -97,6 +118,12 @@ def enhance(config,doc,cap):
             line=lines[index].rstrip('\r\n');content,sep,comment=line.partition('#')
             explicit=bool(doc.frontend_certificates.get(name))
             loaded=re.findall(r'\s+crt\s+(\S+)',content)
+            if sites.get(name):
+                fallback=[cert_dir.rstrip('/')+'/'+v+'.pem' for v in doc.frontend_certificates[name]] if explicit else loaded
+                for path in fallback:
+                    if not PurePosixPath(tls_bindings.path_ok(path)).is_relative_to(cert_dir.rstrip('/')):raise ValueError('Bestehendes TLS-Zertifikat liegt außerhalb des Agent-Zertifikatsverzeichnisses: '+path)
+                plan=tls_bindings.managed_bind(lines[index],name,fallback,sites[name],doc.frontend_certificates.get(name,[]),cert_dir)
+                plans.append(plan);patch[index]=plan['managed'];continue
             if explicit:content=re.sub(r'\s+crt\s+\S+','',content);loaded=[]
             paths=[cert_dir.rstrip('/')+'/'+v+'.pem' for v in dict.fromkeys(values)]
             # Site-specific additions must retain a legacy catch-all cert.pem.
@@ -109,4 +136,4 @@ def enhance(config,doc,cap):
         if index in insert:result+=['\n'.join(insert[index])+'\n']
         result.append(patch.get(index,line))
     if len(lines) in insert:result+=['\n'.join(insert[len(lines)])+'\n']
-    return ''.join(result)
+    return tls_bindings.append_metadata(''.join(result),plans)

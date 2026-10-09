@@ -24,8 +24,9 @@ files = {
     'backend/schemas.py': root / 'backend' / 'schemas.py',
     'backend/haproxy_config.py': root / 'backend' / 'haproxy_config.py',
     'backend/basic_auth.py': root / 'backend' / 'basic_auth.py',
+    'backend/tls_bindings.py': root / 'backend' / 'tls_bindings.py',
 }
-for name in ('__init__.py', 'main.py', 'certificates.py', 'challenge.py', 'config_bundle.py', 'config.example.json',
+for name in ('__init__.py', 'main.py', 'certificates.py', 'challenge.py', 'tls_bindings.py', 'config_bundle.py', 'config.example.json',
              'haproxy-control-agent.service', 'haproxy-control-webroot.service'):
     files[f'agent/{name}'] = root / 'agent' / name
 with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
