@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,InstanceMetadata,Infrastructure,InstanceInfrastructure,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
 from backend import metrics as metric_store
 from backend import topology as topology_store
+from backend import proxy_health as proxy_health_store
 from backend import basic_auth,basic_auth_api,infrastructures
 from backend.settings import settings
 from backend.schemas import LoginIn,PasswordIn,UserIn,InstanceIn,InstanceUpdateIn,InstanceMetadataIn,Document,DraftIn,CertificateIn,ImportedMap,CertificateAdoptIn,CertificateRenewIn,RenewalSettingsIn,CertificatePolicyIn
@@ -671,6 +672,24 @@ def topology(id:int,user=Depends(current_user),db=Depends(get_db)):
     graph['captured_at']=captured_at
     if warning:graph['warnings'].append(warning)
     return graph
+
+@app.get('/api/instances/{id}/proxy-health')
+def proxy_health(id:int,user=Depends(current_user),db=Depends(get_db)):
+    i=instance(db,id)
+    draft=Document.model_validate(i.document or {})
+    captured_at=now().isoformat()+'Z'
+    try:data=agent(i,'/stats')
+    except HTTPException:data={'online':False,'rows':[]}
+    config=None;maps=[]
+    if data.get('online'):
+        try:
+            bundle=agent(i,'/config-bundle');config=bundle['config'];maps=bundle.get('maps',[])
+        except HTTPException as error:
+            if error.status_code in (404,405):
+                try:config=agent(i,'/config')['config']
+                except HTTPException:pass
+    # Polls read the current runtime and config; no metrics, audits or draft writes.
+    return proxy_health_store.build(draft,config,maps,data,captured_at)|{'document_version':i.document_version}
 
 @app.get('/api/instances/{id}/metrics')
 def metrics(id:int,hours:int=1,user=Depends(current_user),db=Depends(get_db)):

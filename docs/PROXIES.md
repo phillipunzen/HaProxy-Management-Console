@@ -59,3 +59,19 @@ Bei übernommenen Backend-Pools wird die vorhandene Zertifikatsprüfung aus `ser
 
 
 Beim erneuten Einlesen einer vom Tool erzeugten Konfiguration bleiben erstellte Hosts reguläre **Proxy Hosts**. IDs, Alias-Namen, Pfade, Backend-TLS einschließlich Insecure verify, zentrale Basic-Auth-Gruppen und Zertifikate werden wiedererkannt. Neue Konfigurationen merken sich zusätzlich den vollständigen grafischen Aufbau einschließlich deaktivierter Hosts und eigener Frontends/Backends. Die Vorschau nennt die wiedererkannten Tool-Hosts. Siehe [IMPORT.md](IMPORT.md).
+
+## Live-Healthchecks der Reverseproxys
+
+Unter **Proxy Hosts** steht bei jedem eigenen Proxy Host und jeder übernommenen Domain-Zuordnung ein **Healthcheck**. Die Anzeige liest alle zehn Sekunden die aktuellen HAProxy-Runtime-Daten und die geladenen Konfigurationsdateien des ausgewählten Servers:
+
+- **Grün – Erreichbar:** HAProxy meldet alle geprüften Ziele als verfügbar.
+- **Gelb – Teilweise erreichbar:** Mindestens ein Ziel ist verfügbar; andere sind ausgefallen, fehlen oder nehmen keine neuen Verbindungen an.
+- **Rot – Ausgefallen:** Alle Ziele sind DOWN. Ein gestopptes Frontend wird gesondert angezeigt.
+- **Wartung / Drain**, **Ohne Healthcheck**, **Lokale Antwort** und **Unbekannt** unterscheiden administrative Zustände, ungeprüfte Ziele, lokale HAProxy-Antworten und fehlende Daten.
+- **Noch nicht angewendet:** Domain, Pfad oder Backend-Ziele des Entwurfs stimmen noch nicht mit der aktiven Konfiguration überein. Die Verfügbarkeit alter Ziele wird dann nicht dem neuen Entwurf zugeschrieben.
+
+Die Anzeige lässt sich aufklappen: Sie zeigt pro Ziel Adresse, Backup-Status, HAProxy-Checkstatus, gegebenenfalls HTTP-Statuscode und Checkdauer. Mehrere Domains mit demselben Backend-Pool teilen dessen Zustand. Deaktivierung im Entwurf und bereits angewendete Deaktivierung werden getrennt erkannt. Nach Speichern oder Anwenden wird der Zustand erneut abgefragt, ohne offene Formulare oder den Entwurf zu überschreiben.
+
+Automatische Proxy-Host-Pools verwenden zunächst einen TCP-Verbindungscheck (`check`). Dieser bestätigt die Verbindung zum Zielport. Ein vollständiger Webseiten-Aufruf über öffentliche DNS-Auflösung, Frontend-TLS und Anmeldung wird damit nicht geprüft. Vorhandene HTTP-, TLS- oder eigene HAProxy-Checks werden unverändert verwendet; zusätzliche Check-Optionen können im Konfigurationseditor gesetzt werden.
+
+Abfragen schreiben keine Metrikdatensätze und keine zusätzliche Historie in MariaDB. Bei fehlender Verbindung werden alte grüne Werte ausgeblendet; nach 45 Sekunden gelten nicht erneuerte Werte als veraltet. Im Hintergrund ausgeblendete Browser-Tabs pausieren die Abfragen und aktualisieren beim Wiederöffnen. Für diese Funktion genügt ein Update des Management-Containers; es sind keine neuen Agent-ENV-Variablen, Tokens oder Agent-Endpunkte erforderlich.

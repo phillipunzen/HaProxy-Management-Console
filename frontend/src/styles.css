@@ -499,3 +499,10 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 .backend-tls-options small { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .imported-server-edit .backend-tls-options { grid-column: 1 / -1; }
 @media (max-width: 700px) { .backend-form .backend-tls-options { grid-column: 1 / -2; } }
+
+/* Live status remains compact; target checks expand inside their own row. */
+.proxy-health-summary{display:flex;align-items:center;gap:14px;padding:16px 20px;margin:0 0 20px;background:#f8fafc;border:1px solid #dfe7f2;border-radius:12px;color:#496487}
+.proxy-health-summary strong{color:#253858}.proxy-health-summary p{margin:4px 0;font-size:12px}.proxy-health-summary small{font-size:11px;line-height:1.5}.proxy-health-counts{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.proxy-health .badge.blue{background:#edf4ff;color:#2563eb;border-color:#d5e4fc}.proxy-health{min-width:170px}.proxy-health summary{cursor:pointer;list-style:none}.proxy-health summary::-webkit-details-marker{display:none}.proxy-health summary .badge:after{content:'▾';margin-left:3px}.proxy-health[open] summary .badge:after{content:'▴'}.proxy-health summary>small{margin-top:5px;display:block}.proxy-health summary:focus-visible{outline:2px solid #2563eb;outline-offset:4px;border-radius:4px}
+.proxy-health-details{max-width:310px;min-width:210px;margin-top:10px;padding:10px 12px;border:1px solid #dfe7f2;border-radius:8px;background:#f8fafc;font-size:12px;white-space:normal;overflow-wrap:anywhere}.proxy-health-details p{margin:0 0 6px;line-height:1.5}.proxy-health-target{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid #dfe7f2}.proxy-health-target>span.mono{font-size:11px}.proxy-health-target small{margin:0;line-height:1.5}
+@media(max-width:700px){.proxy-health-summary{align-items:flex-start;flex-wrap:wrap;padding:14px}.proxy-health-summary>div:first-of-type{flex:1;min-width:0}.proxy-health-counts{margin-left:33px}}
