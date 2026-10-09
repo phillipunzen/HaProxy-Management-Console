@@ -1,6 +1,6 @@
 # Validierung am Entwicklungsserver
 
-Stand: 8. Oktober 2026.
+Stand: 9. Oktober 2026.
 
 - Frontend-Produktionsbuild mit TypeScript erfolgreich.
 - **217 Python- und 15 Frontend-Unit-Tests bestanden**, zusätzlich vier aktuelle Basic-Auth-Laufzeittests und zwei Migrationstests mit echten nativen und Docker-HAProxy-Instanzen. Die zuvor geprüften sechs Integrationstests für allgemeine Authentifizierung und Dienstaktionen sind unten beschrieben.
@@ -66,3 +66,10 @@ Chromium auf Desktop und 390-Pixel-Mobilansicht mit kontrollierten API-Antworten
 
 
 Die Import-Fehlerantwort bleibt als Text in `detail` mit separatem `code` kompatibel zu bereits geladenen älteren Oberflächen. 15 Frontendtests prüfen dieses Format, das zuvor verwendete Objektformat, verschachtelte Fehler, Pydantic-Validierung, fehlende Felder und sichere Ersatztexte statt `[object Object]`. Die HTML-Cache-Prüfung bestätigt erneute Validierung der Startseite; API-Antworten bleiben ohne Cache und Asset-Cache-Header unverändert. Der Docker-Build führt die Frontendtests aus. Chromium prüft beide Fehlerformate in der aktuellen Oberfläche und Klartext in der vorherigen Oberfläche auf Desktop und Mobilansicht.
+
+
+## Bearbeitungsdialoge für importierte Reverseproxys
+
+Der zuvor verdeckte Editor wurde in Chromium auf Desktop und 390-Pixel-Mobilansicht mit 30 Backend-Pools reproduziert: Ein Klick auf den Domain-Einstellungsbutton zeigte das Formular außerhalb des sichtbaren Bereichs, etwa 3.200 Pixel darunter. Domain- und Backend-Bearbeitung öffnen jetzt Dialoge mit dem gewählten Zielserver.
+
+Frontendtests und Produktionsbuild bestanden. Chromium mit kontrollierten API-Antworten prüft sichtbare Dialoge, Basic-Auth-Gruppenzuweisung und Entfernen, Authorization-Weitergabe, leere Gruppen, Domain ändern und hinzufügen, Backend-Port und Verteilung, Abbrechen ohne Speicherung, sichtbare Fehler direkt im Dialog ohne verdeckte Speicherbuttons und erhaltene Eingaben nach einem Speicherfehler, gesperrte Felder und Server-/Infrastrukturwechsel während Bearbeitung, Tastatur und Fokus nach Schließen, TCP-Ausschluss, Operatorrechte, fehlende Gruppen und Konfiguration erzeugen ohne Reload. Speicherung betrifft ausschließlich den gewählten Server; keine JavaScript-Fehler und kein Seitenüberlauf. Die bestehenden HAProxy-Parser und Basic-Auth-Regeln wurden nicht geändert.

@@ -488,3 +488,5 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 .import-agent-update p { margin:10px 0 16px; font-size:12px; color:var(--muted); line-height:1.7; }
 .import-agent-update label { display:block; font-size:12px; font-weight:600; margin-top:14px; }
 .import-agent-update .button { margin:8px 10px 0 0; }
+
+.imported-form-fields { border: 0; margin: 0; padding: 0; min-width: 0; }

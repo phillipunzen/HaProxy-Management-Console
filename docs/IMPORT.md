@@ -51,7 +51,7 @@ Bei einem alten Agenten lässt sich hochgeladener Text weiterhin in der Vorschau
 2. **Vorhandene Config einlesen** wählen.
 3. **Aktive Dateien vom HAProxy-Agenten einlesen → Einlesen & Vorschau** wählen. Alternativ Hauptdatei, weitere `.cfg`-Dateien und Maps hochladen bzw. Text einfügen. Weitere hochgeladene Dateien werden alphabetisch nach der Hauptdatei angehängt. Der Map-Pfad muss genau dem Pfad in der Konfiguration entsprechen.
 4. Erkannte Frontends, Backends, HTTP-/TCP-Dienste und Hinweise prüfen. **Als grafischen Entwurf übernehmen** ersetzt den bisherigen grafischen Entwurf dieser Instanz.
-5. Domain-Zuordnungen und Backend-Ziele im Entwurf bearbeiten. **Konfiguration erzeugen** wählen und im vollständigen Konfigurationseditor mit dem aktiven Text vergleichen.
+5. Unter **Proxy Hosts** den Einstellungsbutton neben einer Domain oder einem Backend-Pool anklicken. Die Bearbeitung öffnet sich direkt als Dialog mit dem gewählten Zielserver. Bei der Domain unter **Website-Zugang** eine zentrale Basic-Auth-Gruppe zuweisen; die zugehörigen Benutzer unter **Basic Auth** verwalten. **Im Entwurf speichern** speichert die Änderung. **Konfiguration erzeugen** wählen und im vollständigen Konfigurationseditor mit dem aktiven Text vergleichen.
 6. **Prüfen & anwenden** führt die Prüfung mit dem HAProxy-Binary des Zielhosts aus, sichert die vorherige Konfiguration und bestätigt den Reload anhand eines neuen Workers.
 
 Ändern sich Hauptdatei, weitere geladene Dateien, Maps oder der grafische Entwurf zwischen Vorschau und Übernahme, wird die Übernahme abgelehnt. Externe Datei-/Map-Änderungen nach dem Import werden auch vor Erzeugung bzw. Anwendung erkannt. Danach erneut einlesen und Änderungen abgleichen.
