@@ -20,6 +20,16 @@ Zuerst den Zielserver bzw. seine Infrastruktur auswählen. Zertifikate und Auftr
 
 **HTTP:** Port 80, die öffentliche DNS-Auflösung und die Weiterleitung von `/.well-known/acme-challenge/` zum Webroot müssen eingerichtet sein. Die [HTTP-Anleitung](AGENT.md#http-01) gilt für native und Docker-Instanzen. HTTP braucht keinen Provider-Token und unterstützt keine Wildcards.
 
+## Vom Staging-Test zum Produktionszertifikat
+
+Ein erfolgreiches Staging-Zertifikat bestätigt die Challenge-Einrichtung. Seine Zertifikatskette wird von normalen Browsern nicht als vertrauenswürdig anerkannt ([Let’s Encrypt](https://letsencrypt.org/docs/staging-environment/)). Es bleibt im getrennten `.staging/`-Verzeichnis und wird nicht auf den produktiven HTTPS-Listener geladen.
+
+Die Zertifikatsauswahl im Proxy Host zeigt Staging-Einträge mit dem Hinweis **zuerst Produktion anfordern**; sie sind dort nicht auswählbar. Unter **Zertifikate → Produktion anfordern** am Testzertifikat wird eine neue Anforderung geöffnet. PEM-Name und Domains sind vorbelegt. Der aktuelle Agent liefert auch E-Mail, Challenge, Provider, Automatik und den Verweis auf den gespeicherten DNS-Zugang, soweit diese im Auftrag vorhanden sind; die Tokens werden dabei nicht zurückgegeben. Bei älteren Agenten fehlende Angaben im Dialog ergänzen oder den Agenten aktualisieren.
+
+Vor dem Absenden den PEM-Namen prüfen: Gibt es auf diesem Server bereits ein Produktionszertifikat mit diesem Namen, wird es nach erfolgreicher Prüfung ersetzt und HAProxy neu geladen. Der Dialog weist darauf hin. Für ein zusätzliches Zertifikat einen anderen Namen verwenden. **Produktionszertifikat anfordern** stellt ein neues Zertifikat über die Produktions-CA aus; ein Staging-Zertifikat wird nicht durch Umbenennen oder Kopieren vertrauenswürdig. Das ursprüngliche Testzertifikat bleibt erhalten. Anschließend das Produktionszertifikat im Proxy Host bzw. HTTPS-Frontend auswählen und den Konfigurationsentwurf prüfen und anwenden.
+
+Alternativ **Zertifikat anfordern** öffnen, dieselben Domains und den gespeicherten DNS-Zugang wählen und **Staging verwenden** deaktivieren.
+
 ## Zeitplan und manuelle Erneuerung
 
 Unter **Zertifikate → Zeitplan** automatische Erneuerung aktivieren oder pausieren. Entweder ein Stundenintervall oder täglich eine Uhrzeit mit Zeitzone einstellen, beispielsweise **03:15 / Europe/Berlin**. Der Zeitplan läuft auf dem Agenten auch bei ausgeschalteter Management-Oberfläche. Eine verpasste tägliche Prüfung wird nach dem Agent-Start nachgeholt; fehlgeschlagene Prüfungen werden beim nächsten geplanten Termin erneut versucht. Der Agent kontrolliert die Fälligkeit etwa jede Minute. Nächste Prüfung, letzte erfolgreiche Prüfung und Fehler sind sichtbar.

@@ -258,7 +258,7 @@ def _issue(p,body):
         a.run(args,timeout=240)
         directory=Path(p.get('letsencrypt_dir','/etc/letsencrypt'))/'live'/key
         pem=(directory/'fullchain.pem').read_bytes()+(directory/'privkey.pem').read_bytes()
-        entry={'engine':'certbot'}
+        entry={'engine':'certbot','request':body.model_dump(exclude={'dns_token','dns_zone_token'})}
     result=a.install_pem(p,body.name,pem,body.staging)
     values[key]=entry | {'name':body.name,'staging':body.staging,'automatic':body.automatic}
     save_entries(p,values)
@@ -336,5 +336,12 @@ def renew(p,name=None,force=False,automatic=False):
 
 def status(p,name,staging):
     entry=next((e for e in entries(p).values() if (e['name'],e['staging'])==(name,staging)),None)
-    return {'managed':entry is not None,'engine':entry.get('engine','certbot') if entry else 'manual',
+    result={'managed':entry is not None,'engine':entry.get('engine','certbot') if entry else 'manual',
             'automatic':bool(entry and not staging and entry.get('automatic',True))}
+    if staging and entry:
+        # A UI template is explicitly public. Never expose arbitrary stored
+        # request fields, tokens, executable paths or imported lineage names.
+        request=entry.get('request',{})
+        result['production_template']={k:request[k] for k in ('email','challenge','provider','dns_credential') if k in request}
+        result['production_template']['automatic']=entry.get('automatic',True)
+    return result

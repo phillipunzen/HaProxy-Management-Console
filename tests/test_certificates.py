@@ -343,3 +343,40 @@ def test_certificate_repr_and_json_never_disclose_token():
     body=CertificateIn(name='x',domains=['example.com'],email='admin@example.com',challenge='dns',provider='cloudflare',dns_token='hidden-token')
     assert 'hidden-token' not in repr(body) and 'hidden-token' not in body.model_dump_json()
     assert body.acme_payload()['dns_token']=='hidden-token'
+
+
+def test_staging_production_template_is_allowlisted_and_has_no_credentials(lego_profile):
+    p=lego_profile
+    jobs.save_entries(p,{'staging':{'name':'test','staging':True,'automatic':True,'engine':'lego','request':{
+        'email':'admin@example.com','challenge':'dns','provider':'cloudflare','dns_credential':'a'*32,
+        'dns_token':'never-public','dns_zone_token':'never-public-zone','env_file':'/private/env','source_name':'hidden-lineage'}}})
+    result=jobs.status(p,'test',True)
+    assert result['managed'] and not result['automatic']
+    assert result['production_template']=={'email':'admin@example.com','challenge':'dns','provider':'cloudflare','dns_credential':'a'*32,'automatic':True}
+    assert 'never-public' not in json.dumps(result) and '/private/env' not in json.dumps(result)
+    assert 'production_template' not in jobs.status(p,'test',False)
+
+
+def test_staging_to_production_reuses_dns_access_but_issues_new_certificate(lego_profile,monkeypatch):
+    p=lego_profile;calls=[];reloads=[]
+    def run(args,timeout):
+        calls.append(args)
+        directory=Path(args[args.index('--path')+1]);source=args[args.index('--cert.name')+1]
+        make_lego_certificate({'lego':{'path':str(directory)}},['example.com','*.example.com'],source)
+    monkeypatch.setattr(a,'run',run);monkeypatch.setattr(a,'validate',lambda *args:'valid')
+    Path(p['config_path']).write_text('global\ndefaults\n mode http\n')
+    monkeypatch.setattr(a,'reload_service',lambda profile:reloads.append(profile) or {'Pid':'1'})
+    body=CertificateIn(name='test',domains=['example.com','*.example.com'],email='admin@example.com',challenge='dns',provider='cloudflare',dns_token='same-dns-token',staging=True)
+    # The real PEM installation must leave production untouched during staging.
+    old=Path(p['cert_dir'])/'test.pem';old.parent.mkdir();old.write_bytes(b'previous-production')
+    jobs.issue(p,body)
+    assert old.read_bytes()==b'previous-production' and reloads==[]
+    staged=old.parent/'.staging/test.pem';staged_bytes=staged.read_bytes()
+    template=jobs.status(p,'test',True)['production_template']
+    production=CertificateIn(name='test',domains=body.domains,staging=False,**template)
+    jobs.issue(p,production)
+    assert staged.read_bytes()==staged_bytes and old.read_bytes()!=b'previous-production' and len(reloads)==1
+    assert 'letsencrypt-staging' in calls[0] and 'letsencrypt' in calls[1]
+    assert calls[0][calls[0].index('--path')+1]!=calls[1][calls[1].index('--path')+1]
+    assert calls[0][calls[0].index('--env-file')+1]==calls[1][calls[1].index('--env-file')+1]
+    assert jobs.status(p,'test',False)['managed'] and len(jobs.entries(p))==2
