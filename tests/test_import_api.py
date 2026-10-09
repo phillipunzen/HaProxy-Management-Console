@@ -210,3 +210,162 @@ def test_html_revalidates_while_api_and_assets_keep_their_cache_policy():
             result=client.get(path);assert result.status_code==200 and result.headers['Cache-Control']=='no-cache'
         assert client.get('/api/auth/me').headers['Cache-Control']=='no-store'
         assert client.get('/assets/versioned.js').headers['Cache-Control']=='public, max-age=31536000, immutable'
+
+@pytest.fixture
+def sync_api(api,monkeypatch):
+    from backend.db import BasicAuthGroup
+    c,factory,_=api
+    cap={'kind':'native','runtime_socket_config':'/run/edge/admin.sock','cert_dir_config':'/srv/edge/certs','tls_site_bindings':True,'config_bundle':True}
+    original=PRIMARY.replace(' bind :8080',' bind :8080\n bind :443 ssl crt /srv/edge/certs/old.pem')
+    state={'active':original,'extra':EXTRA,'map':MAP,'calls':[],'fail':False,'read_error':False,'after_apply':None,'applied':0,'cap':cap}
+    def current_bundle():
+        return {'config':state['active']+'\n'+state['extra'],'hash':sha(state['active']),'complete':True,'warnings':[],
+                'sources':[{'path':'/etc/haproxy/haproxy.cfg','hash':sha(state['active'])},{'path':'/etc/haproxy/conf.d/pools.cfg','hash':sha(state['extra'])}],
+                'maps':[{'path':'/etc/haproxy/maps/vhosts.map','host_path':'/srv/haproxy/maps/vhosts.map','content':state['map'],'hash':sha(state['map'])}]}
+    def remote(i,path='',method='GET',body=None,timeout=10):
+        state['calls'].append((i.id,path,method))
+        if state['applied'] and state['read_error'] and path in ('/config','/config-bundle'):raise HTTPException(502,'Agent nicht erreichbar.')
+        if not path:return state['cap']
+        if path=='/config':return {'config':state['active'],'hash':sha(state['active'])}
+        if path=='/config-bundle':return current_bundle()
+        if path=='/certificates':return [{'name':'site','staging':False,'days_remaining':60,'domains':['app.example.com','new.example.com']}]
+        if path=='/validate':return {'valid':True}
+        if path=='/apply':
+            if state['fail']:raise HTTPException(422,'Konfiguration ungültig.')
+            assert body['expected_hash']==sha(state['active'])
+            state['active']=body['config'];state['extra']='# Consolidated into /etc/haproxy/haproxy.cfg by HAProxy Control\n';state['applied']+=1
+            bundle=current_bundle();result={'applied':True,'hash':sha(state['active']),'sources':bundle['sources'],'map_hashes':[{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']]}
+            if state['after_apply']:state['after_apply']()
+            return result
+        pytest.fail(f'Unexpected agent call {path}')
+    monkeypatch.setattr(main,'agent',remote)
+    with factory() as db:db.add(BasicAuthGroup(name='Paywall',realm='Restricted'));db.commit()
+    preview=c.post('/api/instances/1/import-preview',json={}).json()
+    response=c.post('/api/instances/1/import',json={key:preview[key] for key in ('active_hash','preview_hash','document_version')});assert response.status_code==200,response.text
+    return c,factory,state
+
+
+def apply_generated(c):
+    result=c.post('/api/instances/1/generate',json={});assert result.status_code==200,result.text
+    generated=result.json()
+    revision=c.post('/api/instances/1/revisions',json={'config':generated['config'],'base_hash':generated['base_hash'],'message':'Test apply'}).json()['id']
+    result=c.post(f'/api/instances/1/revisions/{revision}/apply',json={'document_version':generated['document_version']})
+    return result,generated,revision
+
+
+@pytest.mark.parametrize('kind',['native','docker'])
+def test_repeated_apply_keeps_graphical_hosts_auth_tls_and_updates_all_hashes(sync_api,kind):
+    c,factory,state=sync_api;state['cap']['kind']=kind
+    doc=c.get('/api/instances/1/document').json()
+    doc['imported_routes'][0].update(certificate='site',basic_auth_group=1)
+    doc['hosts']=[{'id':'newsite','frontend':'incoming','domain':'new.example.com','certificate':'site','basic_auth_group':1,'servers':[{'address':'192.0.2.30','port':8080}]}]
+    doc['backends']=[{'name':'new_db','mode':'tcp','servers':[{'address':'192.0.2.31','port':3306}]}]
+    doc['frontends']=[{'name':'new_tcp','mode':'tcp','port':3307,'backend':'new_db'}]
+    saved=c.put('/api/instances/1/document',json=doc);assert saved.status_code==200,saved.text
+    for port in (8081,8082,8083):
+        doc=c.get('/api/instances/1/document').json();doc['imported_backends'][0]['servers'][0]['port']=port
+        saved=c.put('/api/instances/1/document',json=doc);assert saved.status_code==200,saved.text
+        result,generated,_=apply_generated(c);assert result.status_code==200,result.text
+        assert result.json()['document_synced'] and not result.json()['sync_warning']
+        refreshed=c.get('/api/instances/1/document').json()
+        assert refreshed['imported_config']==saved.json()['imported_config']
+        assert refreshed['hosts']==saved.json()['hosts'] and refreshed['frontends']==saved.json()['frontends'] and refreshed['backends']==saved.json()['backends']
+        assert refreshed['imported_routes'][0]['certificate']=='site' and refreshed['imported_routes'][0]['basic_auth_group']==1
+        assert refreshed['imported_active_hash']==sha(state['active'])
+        assert refreshed['imported_sources'][1]['hash']==sha(state['extra']) and refreshed['version']==saved.json()['version']+1
+        next_config=c.post('/api/instances/1/generate',json={});assert next_config.status_code==200,next_config.text
+        assert next_config.json()['config'].splitlines().count('backend backend_newsite')==1
+        assert next_config.json()['config'].splitlines().count('frontend new_tcp')==1
+    with factory() as db:assert db.get(Instance,2).document_version==0
+
+
+def test_manual_text_apply_reimports_backend_targets_and_can_generate_again(sync_api):
+    c,_,state=sync_api
+    config=c.post('/api/instances/1/generate',json={}).json()['config'].replace('192.0.2.10:8080','192.0.2.50:9090')
+    revision=c.post('/api/instances/1/revisions',json={'config':config,'base_hash':sha(state['active'])}).json()['id']
+    result=c.post(f'/api/instances/1/revisions/{revision}/apply',json={});assert result.status_code==200,result.text
+    assert result.json()['document_synced']
+    doc=c.get('/api/instances/1/document').json()
+    assert doc['imported_backends'][0]['servers'][0]['address']=='192.0.2.50' and doc['imported_backends'][0]['servers'][0]['port']==9090
+    assert any(b['name']=='db' and b['mode']=='tcp' for b in doc['imported_backends'])
+    assert c.post('/api/instances/1/generate',json={}).status_code==200
+
+
+def test_failed_apply_does_not_advance_graphical_base(sync_api):
+    c,factory,state=sync_api;before=c.get('/api/instances/1/document').json();state['fail']=True
+    result,_,revision=apply_generated(c);assert result.status_code==422
+    assert c.get('/api/instances/1/document').json()==before
+    from backend.db import Revision
+    with factory() as db:assert db.get(Revision,revision).status=='failed'
+
+
+def test_apply_rejects_stale_graphical_version_before_mutation(sync_api):
+    c,_,state=sync_api;generated=c.post('/api/instances/1/generate',json={}).json()
+    revision=c.post('/api/instances/1/revisions',json={'config':generated['config'],'base_hash':generated['base_hash']}).json()['id']
+    doc=c.get('/api/instances/1/document').json();doc['imported_backends'][0]['servers'][0]['port']=9080
+    assert c.put('/api/instances/1/document',json=doc).status_code==200
+    result=c.post(f'/api/instances/1/revisions/{revision}/apply',json={'document_version':generated['document_version']})
+    assert result.status_code==409 and state['applied']==0
+
+
+@pytest.mark.parametrize('change',['draft','active','map','source','network'])
+def test_apply_preserves_concurrent_changes_and_reports_sync_warning(sync_api,change):
+    from backend.db import Revision
+    c,factory,state=sync_api;original=c.get('/api/instances/1/document').json()
+    def changed():
+        if change=='draft':
+            with factory() as db:
+                i=db.get(Instance,1);doc=dict(i.document);doc['maxconn']=4097;i.document=doc;i.document_version+=1;db.commit()
+        elif change=='active':state['active']+='\n# external edit\n'
+        elif change=='map':state['map']+='second.example.com web\n'
+        elif change=='source':state['extra']+='\n# external edit\n'
+        else:state['read_error']=True
+    state['after_apply']=changed
+    result,_,revision=apply_generated(c);assert result.status_code==200,result.text
+    assert result.json()['applied'] and not result.json()['document_synced'] and result.json()['sync_warning']
+    with factory() as db:
+        assert db.get(Revision,revision).status=='applied'
+        assert db.get(Instance,1).document['imported_active_hash']==original['imported_active_hash']
+        if change=='draft':assert db.get(Instance,1).document['maxconn']==4097
+
+
+def test_old_management_stale_base_is_repaired_on_open_without_reimport(sync_api):
+    c,factory,state=sync_api
+    doc=c.get('/api/instances/1/document').json();doc['imported_routes'][0]['certificate']='site'
+    saved=c.put('/api/instances/1/document',json=doc);assert saved.status_code==200
+    before=saved.json();result,_,_=apply_generated(c);assert result.status_code==200
+    with factory() as db:
+        i=db.get(Instance,1);i.document={key:value for key,value in before.items() if key not in ('version','basic_auth_existing')};i.document_version=before['version'];db.commit()
+    repaired=c.get('/api/instances/1/document').json()
+    assert repaired['version']==before['version']+1 and repaired['imported_active_hash']==sha(state['active'])
+    assert repaired['imported_routes'][0]['certificate']=='site'
+    assert c.post('/api/instances/1/generate',json={}).status_code==200
+
+
+def test_text_edit_keeps_central_auth_and_sni_assignments_on_regeneration(sync_api):
+    from backend.basic_auth import read_metadata
+    from backend.tls_bindings import read as tls_plans
+    c,_,state=sync_api;doc=c.get('/api/instances/1/document').json()
+    doc['imported_routes'][0].update(certificate='site',basic_auth_group=1)
+    doc['hosts']=[{'id':'private','frontend':'incoming','domain':'new.example.com','path':'/private','certificate':'site','basic_auth_group':1,'servers':[{'address':'192.0.2.30','port':8080}]}]
+    assert c.put('/api/instances/1/document',json=doc).status_code==200
+    result,_,_=apply_generated(c);assert result.status_code==200 and result.json()['document_synced']
+    generated=c.post('/api/instances/1/generate',json={}).json()
+    config=generated['config'].replace('192.0.2.10:8080','192.0.2.55:8085')
+    revision=c.post('/api/instances/1/revisions',json={'config':config,'base_hash':generated['base_hash']}).json()['id']
+    result=c.post(f'/api/instances/1/revisions/{revision}/apply',json={});assert result.status_code==200,result.text
+    assert result.json()['document_synced']
+    regenerated=c.post('/api/instances/1/generate',json={});assert regenerated.status_code==200,regenerated.text
+    assert read_metadata(regenerated.json()['config'])['sites']==read_metadata(config)['sites']
+    assert tls_plans(regenerated.json()['config'])[0]['sites']==tls_plans(config)[0]['sites']
+    assert '192.0.2.55:8085' in regenerated.json()['config']
+
+
+def test_old_base_recovery_does_not_adopt_external_secondary_edits(sync_api):
+    c,factory,state=sync_api;before=c.get('/api/instances/1/document').json()
+    result,_,_=apply_generated(c);assert result.status_code==200
+    with factory() as db:
+        i=db.get(Instance,1);i.document={key:value for key,value in before.items() if key not in ('version','basic_auth_existing')};i.document_version=before['version'];db.commit()
+    state['extra']+='\n# external change\n'
+    after=c.get('/api/instances/1/document').json();assert after==before
+    assert c.post('/api/instances/1/generate',json={}).status_code==409

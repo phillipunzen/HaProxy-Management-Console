@@ -404,7 +404,59 @@ def config(id:int,user=Depends(operator),db=Depends(get_db)): return agent(insta
 
 @app.get('/api/instances/{id}/document')
 def document(id:int,user=Depends(operator),db=Depends(get_db)):
-    i=instance(db,id);return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
+    i=instance(db,id)
+    recover_applied_document(db,i)
+    return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
+
+def without_migration(config):
+    return ''.join(line for line in config.splitlines(keepends=True) if not line.startswith(MIGRATION_PREFIX))
+
+def applied_bundle(i,config,result,cap=None):
+    """Read back the committed bytes before advancing the editor's base."""
+    active=agent(i,'/config')
+    digest=hashlib.sha256(config.encode()).hexdigest()
+    if active['hash']!=digest or active['config']!=config or result.get('hash',digest)!=digest:
+        raise ValueError('Aktive Konfiguration wurde nach dem Anwenden geändert. Änderungen zuerst abgleichen.')
+    if (cap or {}).get('config_bundle') or i.document.get('imported_sources') or migration_context(config):
+        bundle=agent(i,'/config-bundle')
+        if bundle.get('complete') is False or bundle['hash']!=digest:
+            raise ValueError('Geladene Konfigurationsdateien konnten nicht vollständig abgeglichen werden.')
+        for key,field,path in (('sources','sources','path'),('map_hashes','maps','host_path')):
+            expected=result.get(key)
+            if expected is not None and {s['path']:s['hash'] for s in expected}!={s[path]:s['hash'] for s in bundle[field]}:
+                raise ValueError('Eine Konfigurations- oder Map-Datei wurde nach dem Anwenden extern geändert.')
+        return bundle
+    return {'config':config,'hash':digest,'sources':[],'maps':[],'warnings':[]}
+
+def advance_import(document,bundle):
+    value=dict(document);value['imported_active_hash']=bundle['hash']
+    value['imported_sources']=[{'path':s['path'],'hash':s['hash']} for s in bundle['sources']]
+    value['imported_map_hashes']=[{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']]
+    return value
+
+def recover_applied_document(db,i):
+    """Repair an unchanged draft left stale by an older management version."""
+    if i.document.get('imported_config') is None:return
+    revision=db.scalar(select(Revision).where(Revision.instance_id==i.id,Revision.status=='applied').order_by(Revision.id.desc()).limit(1))
+    if not revision or hashlib.sha256(revision.config.encode()).hexdigest()==i.document.get('imported_active_hash'):return
+    version=i.document_version
+    try:
+        cap=agent(i);doc=Document.model_validate(i.document)
+        if without_migration(generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc))))!=without_migration(revision.config):return
+        bundle=applied_bundle(i,revision.config,{},cap)
+        if {m.path:m.hash for m in doc.imported_map_hashes}!={m['host_path']:m['hash'] for m in bundle['maps']}:return
+        context=migration_context(revision.config)
+        if context:
+            if {s['path'] for s in bundle['sources']}!={s['path'] for s in context['files']}:return
+            primary=next((s['path'] for s in bundle['sources'] if s['hash']==bundle['hash']),None)
+            if not primary:return
+            stub=hashlib.sha256(('# Consolidated into '+primary+' by HAProxy Control\n').encode()).hexdigest()
+            if any(s['hash']!=stub for s in bundle['sources'] if s['path']!=primary):return
+        value=advance_import(i.document,bundle)
+    except (HTTPException,ValueError):return
+    locked=db.scalar(select(Instance).where(Instance.id==i.id).with_for_update().execution_options(populate_existing=True))
+    if not locked or locked.document_version!=version:return
+    locked.document=value;locked.document_version+=1;db.commit()
 
 @app.get('/api/instances/{id}/proxy-layout')
 def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
@@ -474,7 +526,7 @@ def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
                 if not covered:raise ValueError('Zertifikat '+site.certificate+' deckt '+site.domain+' nicht ab.')
         if len(config.encode())>1024*1024:raise ValueError('Erzeugte Konfiguration mit Basic-Auth-Benutzern ist größer als 1 MB.')
     except ValueError as e: raise HTTPException(422,str(e))
-    return {'config':config,'base_hash':current['hash']}
+    return {'config':config,'base_hash':current['hash'],'document_version':i.document_version}
 
 @app.get('/api/instances/{id}/revisions')
 def revisions(id:int,user=Depends(operator),db=Depends(get_db)):
@@ -498,13 +550,24 @@ def save_revision(id:int,body:DraftIn,user=Depends(operator),db=Depends(get_db))
 def validate_config(id:int,body:DraftIn,user=Depends(operator),db=Depends(get_db)):
     return agent(instance(db,id),'/validate','POST',{'config':body.config,'expected_hash':body.base_hash},timeout=40)
 
+class ApplyRevisionIn(BaseModel):
+    document_version:int|None=Field(default=None,ge=0)
+
 @app.post('/api/instances/{id}/revisions/{rev}/apply')
-def apply_revision(id:int,rev:int,user=Depends(operator),db=Depends(get_db)):
+def apply_revision(id:int,rev:int,body:ApplyRevisionIn=ApplyRevisionIn(),user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);r=db.scalar(select(Revision).where(Revision.id==rev).with_for_update())
     if not r or r.instance_id!=id: raise HTTPException(404)
     if r.status in ('applied','applying','uncertain'): raise HTTPException(409,'Diese Version wurde bereits angewendet. Für einen Rollback als neuen Entwurf laden.')
+    if body.document_version is not None and body.document_version!=i.document_version:
+        raise HTTPException(409,'Grafischer Entwurf wurde geändert. Ansicht neu laden und Konfiguration erneut erzeugen.')
     try:auth_metadata=basic_auth.assert_current(db,r.config)
     except ValueError as error:raise HTTPException(409,str(error))
+    document_before=dict(i.document);version_before=i.document_version
+    cap=agent(i)
+    try:
+        doc=Document.model_validate(document_before)
+        matches=generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc)))==r.config
+    except ValueError:matches=False
     # Persist the previous configuration before executing the remote mutation.
     previous=agent(i,'/config')
     if previous['hash']!=r.base_hash: raise HTTPException(409,'Aktive Konfiguration wurde geändert. Neu laden und abgleichen.')
@@ -522,24 +585,35 @@ def apply_revision(id:int,rev:int,user=Depends(operator),db=Depends(get_db)):
         r.status='uncertain' if error.status_code==502 and str(error.detail).startswith('Agent nicht erreichbar') else 'failed'
         audit(db,user.username,'revision.apply.'+r.status,i.name,str(error.detail));db.commit();raise
     r.status='applied';r.applied_at=now()
+    sync_error=None;bundle=None
+    try:bundle=applied_bundle(i,r.config,result,cap)
+    except (HTTPException,ValueError) as error:
+        sync_error=str(error.detail) if isinstance(error,HTTPException) else str(error)
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i:raise HTTPException(404,'Instanz wurde während des Anwendens entfernt.')
-    if i.document.get('imported_config') is not None:
-        try:
-            doc=Document.model_validate(i.document)
-            matches=generate(doc,{},basic_auth.snapshots(db,basic_auth.ids(doc)))==r.config
-        except ValueError:matches=False
-        if matches:
-            document=dict(i.document);document['imported_active_hash']=result['hash']
-            if result.get('sources') is not None:
-                document['imported_sources']=result['sources'];document['imported_map_hashes']=result['map_hashes']
-            i.document=document;i.document_version+=1
+    if bundle is not None:
+        if i.document_version!=version_before:
+            sync_error='Ein anderer Benutzer hat den grafischen Entwurf geändert. Dieser Entwurf bleibt erhalten; Ansicht neu laden und abgleichen.'
+        elif matches:
+            if document_before.get('imported_config') is not None:
+                i.document=advance_import(document_before,bundle);i.document_version+=1
+        else:
+            # Text edits and rollbacks become the new imported baseline. Complex
+            # directives stay intact; central auth and TLS metadata restore their assignments.
+            try:
+                preview=import_config(bundle['config'],bundle['hash'],
+                    [{'path':m['path'],'content':m['content']} for m in bundle['maps']],
+                    [{'path':s['path'],'hash':s['hash']} for s in bundle['sources']],
+                    [{'path':m['host_path'],'hash':m['hash']} for m in bundle['maps']])
+                basic_auth.validate_document(db,Document.model_validate(preview['document']))
+                i.document=preview['document'];i.document_version+=1
+            except ValueError as error:sync_error='Grafischer Abgleich fehlgeschlagen: '+str(error)
     deployment=db.get(BasicAuthDeployment,id)
     if auth_metadata or deployment:
         if not deployment:deployment=BasicAuthDeployment(instance_id=id);db.add(deployment)
         deployment.metadata_json=auth_metadata or {};deployment.applied_at=now()
     audit(db,user.username,'revision.applied',i.name,str(rev));db.commit()
-    return result
+    return result|{'document_synced':sync_error is None,'sync_warning':sync_error}
 
 @app.post('/api/instances/{id}/service/{action}')
 def service(id:int,action:str,user=Depends(operator),db=Depends(get_db)):

@@ -56,6 +56,8 @@ Bei einem alten Agenten lässt sich hochgeladener Text weiterhin in der Vorschau
 
 Ändern sich Hauptdatei, weitere geladene Dateien, Maps oder der grafische Entwurf zwischen Vorschau und Übernahme, wird die Übernahme abgelehnt. Externe Datei-/Map-Änderungen nach dem Import werden auch vor Erzeugung bzw. Anwendung erkannt. Danach erneut einlesen und Änderungen abgleichen.
 
+**Eigene Änderungen über das Tool benötigen keinen erneuten Import:** Nach erfolgreichem Anwenden und bestätigtem Reload liest der Dienst die aktiven Dateien und Maps automatisch zurück und aktualisiert die Import-Basis. Grafische Zuweisungen bleiben erhalten. Über **Prüfen & anwenden** in der grafischen Übersicht laufen Erzeugen, Prüfen, Sichern, Anwenden und Aktualisieren gemeinsam; **Konfiguration erzeugen** öffnet weiterhin den Vergleich im Texteditor.
+
 ## Was wird grafisch bearbeitbar?
 
 - Statische Server in `backend`- und `listen`-Abschnitten: Zieladresse, Port, Gewicht (auch 0) sowie Round Robin, Least Connections und Source. HTTP/TCP-Modus, Servernamen, TLS und zusätzliche Serveroptionen bleiben erhalten.

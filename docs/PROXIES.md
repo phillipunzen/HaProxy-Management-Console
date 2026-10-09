@@ -6,7 +6,15 @@ Die gewählte Infrastruktur grenzt die Serverauswahl ein. Alle Änderungen betre
 
 Unter **Proxy Hosts → Proxy Host** Domain, optionalen Pfad und Zielserver eintragen. Das Tool erzeugt den Backend-Pool `backend_<Host-ID>`, dessen Healthchecks und die Weiterleitung im gewählten HTTP-Frontend automatisch. Ein neuer grafischer Entwurf enthält bereits den gemeinsamen Listener `public_http` für HTTP und optional HTTPS. Bei einer importierten Konfiguration ein vorhandenes HTTP-/HTTPS-Frontend auswählen; bestehende Header, Redirects, TCP-Dienste und globale Einstellungen bleiben erhalten.
 
-Optional eine zentrale Basic-Auth-Gruppe und ein Zertifikat wählen. Beim gemeinsamen Listener eines neuen Entwurfs aktiviert die Zertifikatsauswahl HTTPS. Bei bestehenden oder selbst angelegten Frontends muss TLS am Frontend eingerichtet sein. Die Konfiguration bleibt ein Entwurf bis **Konfiguration erzeugen → Prüfen → Anwenden**.
+Optional eine zentrale Basic-Auth-Gruppe und ein Zertifikat wählen. Beim gemeinsamen Listener eines neuen Entwurfs aktiviert die Zertifikatsauswahl HTTPS. Bei bestehenden oder selbst angelegten Frontends muss TLS am Frontend eingerichtet sein. Die Konfiguration bleibt ein Entwurf bis zum Anwenden.
+
+## Änderungen anwenden
+
+Unter **Proxy Hosts**, **Frontends & Backends** und **Regeln** führt **Prüfen & anwenden** nach Bestätigung den ganzen Ablauf für den angezeigten Server aus: Konfiguration erzeugen, HAProxy-Prüfung, Version und vorherige Konfiguration sichern, anwenden und Reload bestätigen. Die Ansicht wird anschließend automatisch aktualisiert. Zum vorherigen Vergleich weiterhin **Konfiguration erzeugen** verwenden und im Konfigurationseditor prüfen und anwenden.
+
+Nach erfolgreichem Anwenden werden Hauptdatei, geladene Dateien und Maps erneut gelesen. Die Import-Basis wird aktualisiert, während grafische Hosts, eigene Frontends/Backends, Zertifikats- und Basic-Auth-Zuordnungen erhalten bleiben. Ein erneuter manueller Import nach jeder Änderung ist nicht nötig. Bereits durch ältere Management-Versionen veraltete Import-Basen werden beim Öffnen automatisch repariert, wenn sie eindeutig dem zuletzt angewendeten unveränderten Entwurf entsprechen.
+
+Direkte Textänderungen oder Rollbacks werden nach dem Anwenden als neue aktive Import-Basis übernommen. Der Import erkennt die unterstützten Routen und Zielserver; komplexe Regeln bleiben vollständig im Texteditor erhalten. Wenn während des Anwendens ein anderer Benutzer den Entwurf oder jemand die aktiven Dateien verändert, bleibt dieser Stand erhalten und die Oberfläche zeigt den erforderlichen Abgleich an. Ein erfolgreicher Reload wird auch dann als erfolgreich ausgewiesen, wenn das anschließende Einlesen vorübergehend fehlschlägt.
 
 ## Frontends & Backends
 
