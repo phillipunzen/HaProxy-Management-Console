@@ -142,6 +142,14 @@ class BackendServer(BaseModel):
         return v
 
 class Host(BaseModel):
+    proxy_options: list[str] = Field(default_factory=list,max_length=100)
+
+    @field_validator("proxy_options")
+    @classmethod
+    def options_ok(cls,value):
+        from backend.proxy_options import validate
+        return validate(value)
+
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,40}$')
     domain: str = Field(max_length=253)
     aliases: list[str] = Field(default_factory=list,max_length=29)
@@ -224,6 +232,14 @@ class ImportedServer(BackendServer):
     weight: int = Field(default=1,ge=0,le=256)
 
 class ImportedBackend(BaseModel):
+    proxy_options: list[str] | None = Field(default=None,max_length=100)
+
+    @field_validator("proxy_options")
+    @classmethod
+    def options_ok(cls,value):
+        from backend.proxy_options import validate
+        return validate(value) if value is not None else None
+
     name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     mode: Literal['http','tcp','unknown']
     balance: Literal['roundrobin','leastconn','source'] | None = 'roundrobin'
@@ -282,6 +298,14 @@ class ImportedSource(BaseModel):
         return value
 
 class ManagedBackend(BaseModel):
+    proxy_options: list[str] = Field(default_factory=list,max_length=100)
+
+    @field_validator("proxy_options")
+    @classmethod
+    def options_ok(cls,value):
+        from backend.proxy_options import validate
+        return validate(value)
+
     name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     mode: Literal['http','tcp'] = 'http'
     balance: Literal['roundrobin','leastconn','source'] = 'roundrobin'
@@ -331,10 +355,13 @@ class Document(BaseModel):
 
     @model_validator(mode='after')
     def unique_ids(self):
-        if any(s.tls_verify is None for b in self.imported_backends for s in b.servers):
+        if any(b.proxy_options is None for b in self.imported_backends) or any(s.tls_verify is None for b in self.imported_backends for s in b.servers):
             from backend.haproxy_config import extract_backends
             original,_=extract_backends(self.imported_config or '')
             policies={(b.name,s.name):s.tls_verify for b in original for s in b.servers}
+            options={b.name:b.proxy_options for b in original}
+            for b in self.imported_backends:
+                if b.proxy_options is None:b.proxy_options=options.get(b.name,[])
             for b in self.imported_backends:
                 for s in b.servers:
                     if s.tls_verify is None:s.tls_verify=policies.get((b.name,s.name),True)
@@ -359,6 +386,8 @@ class Document(BaseModel):
             raise ValueError('HTTP und HTTPS benötigen verschiedene Ports.')
         if self.imported_config is None and not self.tls_enabled and any(h.enabled and h.force_https and h.frontend=='public_http' for h in self.hosts):
             raise ValueError('HTTPS-Weiterleitungen benötigen einen aktiven HTTPS-Listener.')
+        if any(b.mode!="http" and b.proxy_options for b in self.backends):raise ValueError("Proxy-Optionen benötigen einen HTTP-Backend-Pool.")
+        if sum(len(line) for b in self.hosts+self.imported_managed_hosts+self.backends+self.imported_backends for line in b.proxy_options or [])>512000:raise ValueError("Proxy-Optionen zusammen höchstens 512000 Zeichen pro Server.")
         for items in (self.frontends,self.backends):
             if len({v.name for v in items})!=len(items):raise ValueError('Frontend- und Backend-Namen müssen eindeutig sein.')
         names=[f.name for f in self.frontends]+[b.name for b in self.backends]+['backend_'+h.id for h in self.hosts]

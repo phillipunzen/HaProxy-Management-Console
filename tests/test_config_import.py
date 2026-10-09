@@ -403,7 +403,7 @@ def test_changed_config_uses_live_values_instead_of_saved_document(change):
     if change=='foreign_backend':assert '192.0.2.99:8443' in regenerated and again.hosts[0].id=='wiki'
     if change=='own_backend':assert again.hosts[0].servers[0].address=='192.0.2.71' and '192.0.2.71:8081' in regenerated
     if change=='comment':assert '# user note' in regenerated and again.hosts[0].id=='wiki'
-    if change=='rule':assert not again.hosts and 'http-request set-header X-Extra retained' in regenerated
+    if change=='rule':assert again.hosts[0].proxy_options==['http-request set-header X-Extra retained'] and 'http-request set-header X-Extra retained' in regenerated
 
 
 def test_document_metadata_handles_multifile_stubs_and_rejects_malformed_or_oversized_data():

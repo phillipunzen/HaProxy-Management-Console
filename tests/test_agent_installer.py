@@ -105,3 +105,17 @@ def test_update_rejects_lego_unit_path_injection(tmp_path,path):
     code=code.replace('/etc/haproxy-control/agent.json',str(config)).replace('/etc/systemd/system',str(tmp_path/'systemd'))
     with pytest.raises(SystemExit,match='Ungültiger LEGO-Pfad'):exec(compile(code,'update-acme','exec'),{})
     assert not (tmp_path/'systemd').exists()
+
+
+def test_archive_installer_includes_proxy_option_schema_dependency(tmp_path):
+    import ast,os,subprocess,sys
+    from zipfile import ZipFile
+    extraction=(ROOT/'scripts/install-agent.sh').read_text().split('python3 - "$haproxy_install_temp/package.zip" "$haproxy_install_dir" <<\'PY\'\n',1)[1].split('\nPY\n',1)[0]
+    tree=ast.parse(extraction)
+    allowed=next(ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='allowed' for t in node.targets))
+    assert 'backend/proxy_options.py' in allowed
+    with ZipFile(ROOT/'downloads/haproxy-management-docker.zip') as archive:
+        for name in allowed:
+            target=tmp_path/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(archive.read('haproxy-management/'+name))
+    result=subprocess.run([sys.executable,'-c',"from backend.schemas import Host; h=Host(id='app',domain='app.example.com',servers=[{'address':'127.0.0.1'}],proxy_options=['http-request set-path /reset-password%[path]']); assert len(h.proxy_options)==1"],cwd=tmp_path,env=dict(os.environ,PYTHONPATH=str(tmp_path)),capture_output=True,text=True)
+    assert result.returncode==0,result.stderr

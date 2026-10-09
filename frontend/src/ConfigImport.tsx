@@ -1,3 +1,4 @@
+import {ProxyOptions} from './ProxyOptions';
 import {ProxyHealthCell,type HealthView} from './ProxyHealth';
 import {BackendTLSOptions} from './BackendTLSOptions';
 import {HostnameAliases,HostnameList,hostnames} from './Hostnames';
@@ -6,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BasicAuthSelector, type BasicGroup } from './BasicAuth';
 import { FileCode2, Loader2, Upload, Check, Settings2, Plus, Trash2, Terminal, Copy, RefreshCw } from 'lucide-react';
 
-export type ImportedBackend={name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean;tls_verify?:boolean|null}[]};
+export type ImportedBackend={proxy_options?:string[]|null;name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean;tls_verify?:boolean|null}[]};
 export type ImportedRoute={id:string;frontend:string;domain:string;aliases?:string[];backend:string;basic_auth_group?:number|null;basic_auth_forward?:boolean;basic_auth_replace_existing?:boolean;certificate?:string|null};
 export type ExistingAuth={kind:string;name:string;rules:string[]};
 export type ImportedFields={imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[];basic_auth_existing?:ExistingAuth[]};
@@ -94,20 +95,23 @@ export function ImportedBackendForm({initial,busy,onClose,onSave}:{initial:Impor
         {(['address','port','weight'] as const).map(key=><div className="field" key={key}><label htmlFor={`import-${i}-${key}`}>{key==='address'?'Zieladresse':key==='port'?'Port':'Gewicht'}</label><input id={`import-${i}-${key}`} required type={key==='address'?'text':'number'} min={key==='port'?1:0} max={key==='port'?65535:256} value={s[key]} onChange={e=>setBackend({...backend,servers:backend.servers.map((sv,j)=>i===j?{...sv,[key]:key==='address'?e.target.value:Number(e.target.value)}:sv)})}/></div>)}
       {s.tls&&<BackendTLSOptions tls verify={s.tls_verify} onVerify={tls_verify=>setBackend({...backend,servers:backend.servers.map((sv,j)=>i===j?{...sv,tls_verify}:sv)})}/>}
       </div>)}
+      {backend.mode==='http'&&<ProxyOptions value={backend.proxy_options} disabled={busy} onChange={proxy_options=>setBackend({...backend,proxy_options})}/>}
       <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>Abbrechen</button><button type="submit" className="button">{busy&&<Loader2 size={16} className="spin"/>}Im Entwurf speichern</button></div>
     </fieldset>
   </form>;
 }
 
-export function ImportedRouteForm({initial,groups,fronts,backends,certs=[],existing=[],busy,onClose,onSave}:{initial:ImportedRoute;certs?:Certificate[];existing?:ExistingAuth[];groups:BasicGroup[];fronts:string[];backends:ImportedBackend[];busy:boolean;onClose:()=>void;onSave:(value:ImportedRoute)=>Promise<void>}){
+export function ImportedRouteForm({initial,groups,fronts,backends,certs=[],existing=[],sharedRoutes=[],busy,onClose,onSave}:{sharedRoutes?:ImportedRoute[];initial:ImportedRoute;certs?:Certificate[];existing?:ExistingAuth[];groups:BasicGroup[];fronts:string[];backends:ImportedBackend[];busy:boolean;onClose:()=>void;onSave:(value:ImportedRoute,options?:string[])=>Promise<void>}){
   const [route,setRoute]=useState<ImportedRoute>(()=>({...initial}));
-  const {save,error,errorRef}=useImportedFormSave(onSave);
+  const [options,setOptions]=useState<string[]|undefined>(undefined);
+  const pool=backends.find(b=>b.name===route.backend);
+  const {save,error,errorRef}=useImportedFormSave(async(value:ImportedRoute)=>onSave(value,options));
   const tcp=backends.find(b=>b.name===route.backend)?.mode==='tcp';
   const legacy=existing.filter(s=>['backend','listen'].includes(s.kind)&&s.name===route.backend).flatMap(s=>s.rules);
   const frontendAuth=existing.filter(s=>['frontend','listen'].includes(s.kind)&&s.name===route.frontend).flatMap(s=>s.rules);
   const conflict=!!route.basic_auth_group&&(frontendAuth.length>0||legacy.length>0&&!route.basic_auth_replace_existing);
   const migrationSaved=!!initial.basic_auth_group&&!!initial.basic_auth_replace_existing&&!!route.basic_auth_group&&!!route.basic_auth_replace_existing&&route.domain===initial.domain&&JSON.stringify(route.aliases||[])===JSON.stringify(initial.aliases||[])&&route.frontend===initial.frontend&&route.backend===initial.backend;
-  function chooseBackend(name:string){const tcp=backends.find(b=>b.name===name)?.mode==='tcp';setRoute({...route,backend:name,basic_auth_replace_existing:false,...(tcp?{basic_auth_group:null,basic_auth_forward:false}:{})});}
+  function chooseBackend(name:string){setOptions(undefined);const tcp=backends.find(b=>b.name===name)?.mode==='tcp';setRoute({...route,backend:name,basic_auth_replace_existing:false,...(tcp?{basic_auth_group:null,basic_auth_forward:false}:{})});}
   return <form className="form-body" onSubmit={e=>{e.preventDefault();if(!busy&&!conflict)void save(route);}}>
     {error&&<div ref={errorRef} role="alert" className="notice error">{error}</div>}
     <fieldset className="imported-form-fields" disabled={busy}>
@@ -117,6 +121,7 @@ export function ImportedRouteForm({initial,groups,fronts,backends,certs=[],exist
         <div className="field"><label htmlFor="imported-target">Backend-Pool</label><input id="imported-target" required list="imported-backend-options" value={route.backend} onChange={e=>chooseBackend(e.target.value)}/><datalist id="imported-backend-options">{backends.map(b=><option key={b.name} value={b.name}/>)}</datalist></div>
       </div>
       <CertificateSelector certs={certs} value={route.certificate} onChange={name=>setRoute({...route,certificate:name})}/>
+      {pool?.mode==='http'&&<ProxyOptions value={options??pool.proxy_options} disabled={busy} shared={Array.from(new Set([...sharedRoutes.filter(r=>r.backend===route.backend&&r.id!==route.id).flatMap(hostnames),...hostnames(route)]))} onChange={setOptions}/>}
       <BasicAuthSelector unassignedLabel="Keine zentrale Gruppe · vorhandene Regeln behalten" groups={groups} value={route.basic_auth_group} forward={route.basic_auth_forward} disabled={tcp} onChange={id=>setRoute({...route,basic_auth_group:id,basic_auth_forward:false,basic_auth_replace_existing:!!id&&route.basic_auth_replace_existing})} onForward={forward=>setRoute({...route,basic_auth_forward:forward})}/>
       {legacy.length>0&&!migrationSaved&&<section className="notice"><div><strong>Vorhandene Backend-Anmeldung · {route.backend}</strong><p>Diese Domain unterliegt bereits eigenen Authentifizierungsregeln. Ohne zentrale Gruppe bleiben diese Regeln aktiv.</p><details><summary>Vorhandene Regeln anzeigen</summary>{legacy.map((rule,i)=><pre className="wizard-command" key={i}>{rule}</pre>)}</details>{!!route.basic_auth_group&&<><label className="checkbox"><input type="checkbox" checked={!!route.basic_auth_replace_existing} onChange={e=>setRoute({...route,basic_auth_replace_existing:e.target.checked})}/>{route.aliases?.length?'Vorhandene Backend-Anmeldung für diese Hostnamen ersetzen':'Vorhandene Backend-Anmeldung für diese Domain ersetzen'}</label><p>Für {route.domain?hostnames(route).join(', '):'diese Domain'} am Frontend {route.frontend} gilt danach die ausgewählte zentrale Gruppe. Die bisherigen Benutzer erhalten hier nur Zugang, wenn sie dieser Gruppe angehören. Andere Domains und Frontends behalten ihre bisherigen Regeln.</p></>}</div></section>}
       {!!route.basic_auth_group&&frontendAuth.length>0&&<div className="notice error" role="alert">Im Frontend {route.frontend} besteht ebenfalls eine eigene Anmeldung. Diese zuerst in der ursprünglichen Konfiguration abstimmen und erneut einlesen. Die Umstellung hier gilt für Backend-Regeln.</div>}

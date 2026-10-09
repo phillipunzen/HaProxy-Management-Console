@@ -75,3 +75,28 @@ Die Anzeige lässt sich aufklappen: Sie zeigt pro Ziel Adresse, Backup-Status, H
 Automatische Proxy-Host-Pools verwenden zunächst einen TCP-Verbindungscheck (`check`). Dieser bestätigt die Verbindung zum Zielport. Ein vollständiger Webseiten-Aufruf über öffentliche DNS-Auflösung, Frontend-TLS und Anmeldung wird damit nicht geprüft. Vorhandene HTTP-, TLS- oder eigene HAProxy-Checks werden unverändert verwendet; zusätzliche Check-Optionen können im Konfigurationseditor gesetzt werden.
 
 Abfragen schreiben keine Metrikdatensätze und keine zusätzliche Historie in MariaDB. Bei fehlender Verbindung werden alte grüne Werte ausgeblendet; nach 45 Sekunden gelten nicht erneuerte Werte als veraltet. Im Hintergrund ausgeblendete Browser-Tabs pausieren die Abfragen und aktualisieren beim Wiederöffnen. Für diese Funktion genügt ein Update des Management-Containers; es sind keine neuen Agent-ENV-Variablen, Tokens oder Agent-Endpunkte erforderlich.
+
+## Proxy-Optionen pro Reverseproxy
+
+Unter **Proxy Hosts → Bearbeiten → Proxy-Optionen** können HAProxy-Direktiven zeilenweise ergänzt, verändert oder gelöscht werden. Der HTTP-Modus wird automatisch gesetzt; ein mitkopiertes `mode http` ist erlaubt und wird beim Speichern aus dem Optionsfeld entfernt. Eigene Proxy Hosts verwalten diese Optionen in ihrem automatisch erzeugten Backend-Pool. Bei übernommenen Domain-Zuordnungen zeigt der gleiche Editor die lokalen Optionen des zugeordneten Backend-Pools. Änderungen daran gelten für alle Domains und sonstigen Listener, die diesen Pool nutzen; die zugeordneten Hostnamen werden angezeigt. HTTP-Pools lassen sich außerdem unter **Frontends & Backends → Backend bearbeiten** bzw. **Übernommene Backend-Pools → Bearbeiten** konfigurieren.
+
+Beispiel für eine Anwendung unter einem anderen Zielpfad:
+
+```haproxy
+http-request set-path /reset-password%[path]
+http-request set-header Host %[req.hdr(host)]
+http-request set-header X-Forwarded-Host %[req.hdr(host)]
+http-request set-header X-Forwarded-Proto https
+http-request set-header X-Forwarded-Port 443
+option forwardfor header X-Forwarded-For
+```
+
+Damit wird `/login?token=abc` zum Zielpfad `/reset-password/login?token=abc`. Domain-/Pfad-Routing und zentrale Basic Auth werden davor ausgewertet. Die Rewrite-Regel ändert den an den Backend-Server gesendeten Pfad.
+
+**Forwarded-Header hinzufügen** ergänzt die üblichen Header, ohne vorhandene Werte derselben Direktive zu ersetzen oder doppelt anzulegen. Die Vorlage ermittelt Protokoll und Frontend-Port dynamisch (`ssl_fc` und `dst_port`); feste Werte wie im Beispiel sind ebenfalls möglich. **Pfad-Präfix als Beispiel** fügt die erste Beispielzeile hinzu. Bestehende Pfad-Umschreibungen werden dabei beibehalten. Einzelne Optionen durch Löschen ihrer Zeile entfernen, oder **Alle Optionen entfernen** verwenden.
+
+Unterstützt werden HTTP-Pfad-/URI-/Query-Umschreibungen, Request-/Response-/After-Response-Header, Variablen, `option`, `no option` und Backend-Timeouts. Reihenfolge, HAProxy-Ausdrücke, Anführungszeichen und Inline-Kommentare bleiben erhalten; leere Zeilen und reine Kommentarzeilen werden nicht als Optionen gespeichert. Optionen aus `defaults` bleiben geerbt. Zum Deaktivieren einer geerbten Option beispielsweise `no option forwardfor` verwenden. Listener, Serverdefinitionen, allgemeines Routing und Authentifizierung werden über ihre eigenen Einstellungen oder den vollständigen Konfigurationseditor bearbeitet.
+
+Bei Imports werden unterstützte lokale Optionen aus dem ursprünglichen Backend übernommen; bereits gespeicherte Import-Entwürfe erhalten diese Informationen beim Laden. Ein ausdrücklich geleertes Optionsfeld entfernt sie. Nicht bearbeitete Konfigurationszeilen, zusätzliche Server-/Healthcheck-Parameter und bestehende Authentifizierungsregeln bleiben erhalten. Erneutes Einlesen erkennt gespeicherte Optionen wieder. Die endgültige Syntax prüft der HAProxy-Prozess des Zielservers vor dem Anwenden; erst **Im Entwurf speichern → Prüfen & anwenden** aktiviert die Änderung.
+
+Für diese Funktion genügt ein Update des Management-Containers. Das Docker-Archiv und der Installer enthalten das zusätzliche Schema-Hilfsmodul für künftige Agent-Installationen.

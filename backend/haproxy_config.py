@@ -220,6 +220,7 @@ def endpoint(value):
 
 
 def extract_backends(config):
+    from backend.proxy_options import option_lines
     lines,sections=parse_sections(config); backends=[]; warnings=[]
     names=[s.name for s in sections if s.kind in ('backend','listen')]
     for s in sections:
@@ -244,7 +245,7 @@ def extract_backends(config):
             warnings.append(f'{s.name}: Doppelte Servernamen bleiben im Texteditor.')
             servers=[sv for sv in servers if sv.name not in duplicates]
         if servers:
-            try:backends.append(ImportedBackend(name=s.name,mode=s.mode if s.mode in ('http','tcp') else 'unknown',balance=balance,servers=servers))
+            try:backends.append(ImportedBackend(name=s.name,mode=s.mode if s.mode in ('http','tcp') else 'unknown',balance=balance,servers=servers,proxy_options=[text for _,text in option_lines(lines,s)]))
             except ValueError:warnings.append(f'{s.name}: Komplexer Backend-Name bleibt im Texteditor.')
     return backends,warnings
 
@@ -286,6 +287,7 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
 
 
 def generate_imported(doc):
+    from backend.proxy_options import patch_options
     original=remove_original_tool_hosts(strip_document_metadata(doc.imported_config),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
     baseline,_=extract_backends(original)
     if doc.rules:raise ValueError('Übernommene Konfiguration: allgemeine Regeln im Texteditor ergänzen.')
@@ -329,6 +331,9 @@ def generate_imported(doc):
                 if verify and not re.search(r'(?<!\S)ca-file\s+',body) and not section.server_ca_file:
                     body=body.rstrip()+' ca-file /etc/ssl/certs/ca-certificates.crt'+(' ' if sep else '')
             patch[index]=match[1]+addr+body+sep+comment+(match[4] or '')
+        if edited.proxy_options!=old.proxy_options:
+            if edited.mode!="http":raise ValueError("Proxy-Optionen benötigen einen HTTP-Backend-Pool.")
+            patch_options(lines,section,edited.proxy_options or [],patch)
     rules,_,_=map_routes(original,[m.model_dump() for m in doc.imported_maps])
     valid_fronts={rule['frontend'] for rule in rules};back_names={s.name for s in sections if s.kind in ('backend','listen')}
     back_names.update(b.name for b in doc.backends if b.mode=='http')
@@ -407,6 +412,7 @@ def recover_tool_hosts(config,maps=None):
     from backend.tls_bindings import read as tls_plans
     from backend.schemas import Host,BackendServer
     from backend.generator import host_acl,backend_tls,address
+    from backend.proxy_options import option_lines
     original_lines,original_sections=parse_sections(config)
     clean=strip_managed(config);lines,sections=parse_sections(clean)
     pools,_=extract_backends(clean);pools={p.name:p for p in pools}
@@ -439,12 +445,13 @@ def recover_tool_hosts(config,maps=None):
             if any(acl in t or path_acl in t for s in sections if s is not front for _,t in s.lines):continue
             try:
                 servers=[BackendServer(**s.model_dump(exclude={'name'})) for s in pool.servers]
-                host=Host(id=id,frontend=front.name,domain=names[0],aliases=names[1:],path=paths[0][3],force_https=bool(redirects),balance=pool.balance,servers=servers)
+                host=Host(id=id,frontend=front.name,domain=names[0],aliases=names[1:],path=paths[0][3],force_https=bool(redirects),balance=pool.balance,servers=servers,proxy_options=pool.proxy_options or [])
                 generated=[shlex.split(line) for line in host_acl(host)]
                 legacy=[t[:2]+['hdr(host),field(1,:)','-m','end','-i']+t[4:] if t[2:4]==['hdr_end(host),field(1,:)','-i'] else t for t in host_rules]
                 if generated!=legacy:continue
                 expected_pool=[['balance',pool.balance]]+[['server','srv_'+str(i+1),address(s.address,s.port),'weight',str(s.weight),'check']+shlex.split(backend_tls(s)) for i,s in enumerate(servers)]
-                actual=[t for _,t in section.lines if t!=['mode','http']]
+                option_indexes={i for i,_ in option_lines(lines,section)}
+                actual=[t for i,t in section.lines if t!=['mode','http'] and i not in option_indexes]
                 if actual!=expected_pool:continue
                 # Do not silently discard user comments or custom directives.
                 original_front=next(s for s in original_sections if s.kind==front.kind and s.name==front.name)

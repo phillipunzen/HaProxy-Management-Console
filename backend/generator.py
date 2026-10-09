@@ -68,7 +68,8 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     if doc.acme_enabled:
         out += ['', 'backend acme_webroot', f'    server acme {address(doc.acme_address,doc.acme_port)}']
     for host in (h for h in doc.hosts if h.enabled):
-        out += ['', f'backend backend_{host.id}', f'    balance {host.balance}']
+        out += ['', f'backend backend_{host.id}', '    mode http', f'    balance {host.balance}']
+        out += ['    '+line for line in host.proxy_options]
         for i, server in enumerate(host.servers):
             tls = backend_tls(server)
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']

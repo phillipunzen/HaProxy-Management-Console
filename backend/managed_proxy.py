@@ -17,8 +17,8 @@ def servers(values):
     return result
 
 
-def backend(name,mode,balance,values):
-    return ['backend '+name,'    mode '+mode,'    balance '+balance]+servers(values)
+def backend(name,mode,balance,values,options=()):
+    return ['backend '+name,'    mode '+mode,'    balance '+balance]+['    '+line for line in options]+servers(values)
 
 
 def enhance(config,doc,cap):
@@ -60,7 +60,7 @@ def enhance(config,doc,cap):
     additions=[]
     for pool in doc.backends:
         if pool.name in names:raise ValueError('Backend-Namenskonflikt: '+pool.name)
-        names.add(pool.name);additions+=['']+backend(pool.name,pool.mode,pool.balance,pool.servers)
+        names.add(pool.name);additions+=['']+backend(pool.name,pool.mode,pool.balance,pool.servers,pool.proxy_options)
     for front in doc.frontends:
         if front.name in names:raise ValueError('Frontend-Namenskonflikt: '+front.name)
         names.add(front.name)
@@ -74,7 +74,7 @@ def enhance(config,doc,cap):
             if not host.enabled:continue
             name='backend_'+host.id
             if name in names:raise ValueError('Proxy-Host-Backend existiert bereits: '+name)
-            names.add(name);additions+=['']+backend(name,'http',host.balance,host.servers)
+            names.add(name);additions+=['']+backend(name,'http',host.balance,host.servers,host.proxy_options)
     if additions:config=config.rstrip()+'\n'+'\n'.join(additions)+'\n'
     lines,sections=parse_sections(config)
     frontends={s.name:s for s in sections if s.kind in ('frontend','listen')}
