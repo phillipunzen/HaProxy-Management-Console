@@ -358,7 +358,9 @@ def test_staging_production_template_is_allowlisted_and_has_no_credentials(lego_
 
 
 def test_staging_to_production_reuses_dns_access_but_issues_new_certificate(lego_profile,monkeypatch):
+    import os
     p=lego_profile;calls=[];reloads=[]
+    p.update(cert_uid=os.getuid(),cert_gid=os.getgid())
     def run(args,timeout):
         calls.append(args)
         directory=Path(args[args.index('--path')+1]);source=args[args.index('--cert.name')+1]
