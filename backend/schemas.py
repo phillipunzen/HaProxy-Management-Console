@@ -342,6 +342,8 @@ class Document(BaseModel):
     # Original generated hosts still present in the imported baseline.
     imported_managed_hosts: list[Host] = Field(default_factory=list,max_length=200)
     imported_backends: list[ImportedBackend] = Field(default_factory=list,max_length=500)
+    # Tombstones against the unchanged imported baseline; no active file is edited.
+    removed_backends: list[str] = Field(default_factory=list,max_length=500)
     imported_routes: list[ImportedRoute] = Field(default_factory=list,max_length=2000)
     imported_route_frontends: list[str] = Field(default_factory=list,max_length=500)
     imported_maps: list[ImportedMap] = Field(default_factory=list,max_length=100)
@@ -352,6 +354,13 @@ class Document(BaseModel):
     @classmethod
     def acme_ok(cls,v):
         return BackendServer(address=v).address
+
+    @field_validator('removed_backends')
+    @classmethod
+    def removed_names(cls,value):
+        if len(set(value))!=len(value) or any(not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',name) for name in value):
+            raise ValueError('Gelöschte Backend-Namen müssen gültig und eindeutig sein.')
+        return value
 
     @model_validator(mode='after')
     def unique_ids(self):

@@ -247,7 +247,7 @@ def import_preview_for(i,body):
     except ValueError as error:raise HTTPException(422,str(error))
     current=Document.model_validate(i.document).model_dump()
     incoming=preview['document']
-    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates')
+    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates','removed_backends')
     if any(current.get(key) for key in editable) and any(current.get(key)!=incoming.get(key) for key in editable):
         preview['warnings'].append('Die Übernahme ersetzt den aktuellen Arbeitsentwurf durch den eingelesenen Stand. Noch nicht angewendete Änderungen vorher anwenden oder sichern; Einlesen & Vorschau allein ändert den Entwurf nicht.')
     preview['warnings']+=bundle['warnings'];preview['active_hash']=bundle['hash']
@@ -486,6 +486,11 @@ def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
             config+=f'\nfrontend {front.name}\n    mode {front.mode}\n    bind {endpoint(front.bind_address,front.port)}'+(' ssl' if front.tls_enabled else '')+'\n'
             if front.backend:config+='    default_backend '+front.backend+'\n'
     proxies=inventory(config)
+    # An unrelated incomplete listener/auth setting may require the fallback
+    # inventory; it must still respect deletions already saved in the draft.
+    proxies=[p for p in proxies if not (p['kind'] in ('backend','listen') and p['name'] in doc.removed_backends)]
+    for proxy in proxies:
+        proxy['routes']=[r for r in proxy['routes'] if r['backend'] not in doc.removed_backends]
     pools,_=extract_backends(config)
     for proxy in proxies:
         proxy['targets']=next(([{'name':s.name,'address':s.address,'port':s.port} for s in b.servers] for b in pools if b.name==proxy['name']),[])
@@ -504,6 +509,34 @@ def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)
     if body.version!=i.document_version: raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
     i.document=body.model_dump(exclude={'version'});i.document_version+=1
     audit(db,user.username,'document.saved',i.name);db.commit();return i.document|{'version':i.document_version,'basic_auth_existing':existing}
+
+class BackendDeleteIn(BaseModel):
+    name:str=Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
+    version:int=Field(ge=0)
+
+@app.post('/api/instances/{id}/backend-delete-preview')
+def preview_backend_delete(id:int,body:BackendDeleteIn,user=Depends(operator),db=Depends(get_db)):
+    from backend.backend_delete import plan
+    i=instance(db,id)
+    if body.version!=i.document_version:raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
+    try:_,summary=plan(Document.model_validate(i.document),body.name)
+    except ValueError as error:raise HTTPException(422,str(error))
+    return summary|{'version':i.document_version}
+
+@app.post('/api/instances/{id}/backend-delete')
+def delete_backend(id:int,body:BackendDeleteIn,user=Depends(operator),db=Depends(get_db)):
+    from backend.backend_delete import plan
+    basic_auth.lock_directory(db)
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
+    if not i:raise HTTPException(404)
+    if body.version!=i.document_version:raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
+    try:
+        doc,_=plan(Document.model_validate(i.document),body.name)
+        basic_auth.validate_document(db,doc)
+    except ValueError as error:raise HTTPException(422,str(error))
+    i.document=doc.model_dump(exclude={'version'});i.document_version+=1
+    audit(db,user.username,'backend.deleted',i.name,body.name);db.commit()
+    return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
 
 @app.post('/api/instances/{id}/generate')
 def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):

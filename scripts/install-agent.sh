@@ -43,7 +43,7 @@ python3 - "$haproxy_install_temp/package.zip" "$haproxy_install_dir" <<'PY'
 import sys
 from pathlib import Path
 from zipfile import ZipFile
-allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/proxy_options.py', 'backend/haproxy_config.py', 'backend/tls_bindings.py',
+allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/proxy_options.py', 'backend/backend_delete.py', 'backend/haproxy_config.py', 'backend/tls_bindings.py',
            'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/challenge.py', 'agent/tls_bindings.py', 'agent/haproxy-control-webroot.service', 'agent/config_bundle.py', 'agent/config.example.json']
 with ZipFile(sys.argv[1]) as archive:
     for name in allowed:

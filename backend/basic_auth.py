@@ -55,8 +55,8 @@ def bindings(doc):
             editable={(r.frontend,name) for r in editable for name in r.hostnames}
             # Uneditable pre-existing managed sites remain protected, including
             # native path hosts that the conservative import cannot yet edit.
-            owned={'backend_'+h.id for h in doc.imported_managed_hosts}
-            result += [s for s in old['sites'] if s['backend'] not in owned and (s['kind']!='route' or (s['frontend'],s['domain']) not in editable) and not any(h.frontend==s['frontend'] and s['domain'] in h.hostnames and h.path==s['path'] for h in doc.hosts)]
+            owned={'backend_'+h.id for h in doc.imported_managed_hosts}|set(doc.removed_backends)
+            result += [s for s in old['sites'] if s['backend'] not in owned and s['frontend'] not in doc.removed_backends and (s['kind']!='route' or (s['frontend'],s['domain']) not in editable) and not any(h.frontend==s['frontend'] and s['domain'] in h.hostnames and h.path==s['path'] for h in doc.hosts)]
     return result
 
 

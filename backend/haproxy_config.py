@@ -288,11 +288,13 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
 
 def generate_imported(doc):
     from backend.proxy_options import patch_options
+    from backend.backend_delete import remove_sections
     original=remove_original_tool_hosts(strip_document_metadata(doc.imported_config),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
     baseline,_=extract_backends(original)
     if doc.rules:raise ValueError('Übernommene Konfiguration: allgemeine Regeln im Texteditor ergänzen.')
-    if {b.name for b in doc.imported_backends}!={b.name for b in baseline}:
-        raise ValueError('Übernommene Backend-Pools können hier nicht hinzugefügt oder entfernt werden.')
+    removed=set(doc.removed_backends)
+    if {b.name for b in doc.imported_backends}!={b.name for b in baseline if b.name not in removed}:
+        raise ValueError('Backend-Pools über die Löschfunktion entfernen; neue Pools unter Frontends & Backends anlegen.')
     lines,sections=parse_sections(original); lookup={b.name:b for b in baseline}; patch={}
     for edited in doc.imported_backends:
         old=lookup[edited.name]; section=next(s for s in sections if s.kind in ('backend','listen') and s.name==edited.name)
@@ -335,11 +337,12 @@ def generate_imported(doc):
             if edited.mode!="http":raise ValueError("Proxy-Optionen benötigen einen HTTP-Backend-Pool.")
             patch_options(lines,section,edited.proxy_options or [],patch)
     rules,_,_=map_routes(original,[m.model_dump() for m in doc.imported_maps])
-    valid_fronts={rule['frontend'] for rule in rules};back_names={s.name for s in sections if s.kind in ('backend','listen')}
+    valid_fronts={rule['frontend'] for rule in rules if rule['frontend'] not in removed};back_names={s.name for s in sections if s.kind in ('backend','listen') and s.name not in removed}
     back_names.update(b.name for b in doc.backends if b.mode=='http')
     if any(r.frontend not in valid_fronts or r.backend not in back_names for r in doc.imported_routes):
         raise ValueError('Domain-Routen müssen einen eingelesenen Frontend- und Backend-Namen verwenden.')
     for rule in rules:
+        if rule['frontend'] in removed:continue
         routes=[r for r in doc.imported_routes if r.frontend==rule['frontend']]
         names=[name for r in routes for name in r.hostnames]
         if len(set(names))!=len(names):raise ValueError('Doppelte Domain im selben Frontend.')
@@ -351,11 +354,12 @@ def generate_imported(doc):
             if any(i not in rule.get('indexes',[]) and re.search(r'\bacl\s+'+re.escape(acl)+r'\b',line) for i,line in enumerate(lines)):
                 raise ValueError('ACL-Namenskonflikt; Domain-ID ändern.')
             entries += [indent+f'acl {acl} hdr(host) -i '+ ' '.join(route.hostnames),indent+f'use_backend {route.backend} if {acl}']
-        if rule['default']:entries.append(indent+'use_backend '+rule['default'])
+        if rule['default'] and rule['default'] not in removed:entries.append(indent+'use_backend '+rule['default'])
         patch[index]=ending.join(entries)+ending
         for other in rule.get('indexes',[]):
             if other!=index:patch[other]=''
     result=''.join(patch.get(index,line) for index,line in enumerate(lines) if not line.startswith(MIGRATION_PREFIX))
+    result=remove_sections(result,removed)
     if doc.imported_sources:
         context={'files':[s.model_dump() for s in doc.imported_sources],'maps':[s.model_dump() for s in doc.imported_map_hashes]}
         result=result.rstrip('\r\n')+'\n'+MIGRATION_PREFIX+base64.b64encode(json.dumps(context,separators=(',',':')).encode()).decode()+'\n'
@@ -374,7 +378,7 @@ def document_fingerprint(config):
 
 
 def remember_document(config,doc):
-    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules):return strip_document_metadata(config)
+    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends):return strip_document_metadata(config)
     snapshot=doc.model_dump(exclude={'version','imported_active_hash','imported_sources','imported_map_hashes'})
     if snapshot['imported_config'] is not None:snapshot['imported_config']=strip_document_metadata(snapshot['imported_config'])
     payload={'document':snapshot,'fingerprint':document_fingerprint(config)}
