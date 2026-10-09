@@ -3,6 +3,14 @@ from backend.schemas import Document
 def address(host, port):
     return f'[{host}]:{port}' if ':' in host else f'{host}:{port}'
 
+def backend_tls(server):
+    if not server.tls:return ''
+    tls=' ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt' if server.tls_verify else ' ssl verify none'
+    if ':' not in server.address and not server.address.replace('.','').isdigit():
+        tls+=f' sni str({server.address})'
+        if server.tls_verify:tls+=f' verifyhost {server.address}'
+    return tls
+
 def host_acl(host):
     result=[]
     exact=[name for name in host.hostnames if not name.startswith('*.')]
@@ -61,8 +69,6 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     for host in (h for h in doc.hosts if h.enabled):
         out += ['', f'backend backend_{host.id}', f'    balance {host.balance}']
         for i, server in enumerate(host.servers):
-            tls = ' ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt' if server.tls else ''
-            if server.tls and ':' not in server.address and not server.address.replace('.', '').isdigit():
-                tls += f' sni str({server.address}) verifyhost {server.address}'
+            tls = backend_tls(server)
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
     return inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth)

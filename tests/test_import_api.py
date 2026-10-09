@@ -378,3 +378,16 @@ def test_management_rejects_selected_certificate_missing_alias(sync_api):
     assert result.status_code==200,result.text
     result=c.post('/api/instances/1/generate',json={})
     assert result.status_code==422 and 'not-covered.example.net' in result.text
+
+
+def test_reading_old_draft_exposes_original_backend_verification_without_mutating_it(api):
+    c,factory,_=api
+    config='defaults\n mode http\nbackend web\n server origin 192.0.2.1:443 ssl verify none\n'
+    draft=main.import_config(config,sha(config))['document']
+    draft['imported_backends'][0]['servers'][0].pop('tls_verify')
+    with factory() as db:
+        db.get(Instance,1).document=draft;db.commit()
+    result=c.get('/api/instances/1/document');assert result.status_code==200,result.text
+    assert result.json()['imported_backends'][0]['servers'][0]['tls_verify'] is False
+    with factory() as db:
+        assert db.get(Instance,1).document==draft and db.get(Instance,1).document_version==0

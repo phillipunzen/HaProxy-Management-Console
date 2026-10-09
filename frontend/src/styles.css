@@ -236,7 +236,7 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 .modal > .modal-actions { margin: 21px 27px 26px; }
 .form-section-title { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 17px; padding-top: 18px; border-top: 1px solid var(--line); }
 .form-section-title h3 { font-size: 13px; color: #6488bc; }
-.backend-form { display: grid; grid-template-columns: minmax(120px, 1fr) 80px 85px 57px 30px; align-items: center; gap: 10px; }
+.backend-form { display: grid; grid-template-columns: minmax(120px, 1fr) 80px 85px minmax(160px, 190px) 30px; align-items: center; gap: 10px; }
 .backend-form .field > label { font-size: 11px; }
 .backend-form .field { margin-bottom: 15px; }
 .backend-form .checkbox { padding-top: 7px; }
@@ -494,3 +494,8 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 .imported-form-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
 
 .certificate-actions{flex-wrap:wrap;gap:10px}.certificate-actions + .stats-note{margin-top:16px}
+
+.backend-tls-options { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.backend-tls-options small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.imported-server-edit .backend-tls-options { grid-column: 1 / -1; }
+@media (max-width: 700px) { .backend-form .backend-tls-options { grid-column: 1 / -2; } }

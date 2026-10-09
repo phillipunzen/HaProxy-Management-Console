@@ -109,24 +109,31 @@ class Section:
     balance: str | None = 'roundrobin'
     default_weight: int = 1
     server_tls: bool = False
+    server_verify: bool = True
+    server_ca_file: str | None = None
     lines: list = field(default_factory=list)
 
 
 def parse_sections(config):
-    lines=config.splitlines(keepends=True); sections=[]; defaults={}; inherited={'mode':'tcp','balance':'roundrobin','default_weight':1,'server_tls':False}
+    global_values=re.findall(r'(?m)^\s*ssl-server-verify\s+(none|required)\s*(?:#.*)?$',config)
+    global_verify=not global_values or global_values[-1]!='none'
+    def base():return {'mode':'tcp','balance':'roundrobin','default_weight':1,'server_tls':False,'server_verify':global_verify,'server_ca_file':None}
+    lines=config.splitlines(keepends=True); sections=[]; defaults={}; inherited=base()
     for index,line in enumerate(lines):
         try: tokens=shlex.split(line,comments=True)
         except ValueError: tokens=[]
         if tokens and tokens[0] in HEADERS:
             if sections: sections[-1].end=index
             kind=tokens[0];name=tokens[1] if len(tokens)>1 else ''
-            values={'mode':'tcp','balance':'roundrobin','default_weight':1,'server_tls':False} if kind=='defaults' else inherited.copy()
+            values=base() if kind=='defaults' else inherited.copy()
             if 'from' in tokens:
                 pos=tokens.index('from')
                 if pos+1<len(tokens):values=defaults.get(tokens[pos+1],{'mode':'unknown'}).copy()
             sections.append(Section(kind,name,index,**values))
         elif sections and tokens:
             section=sections[-1];section.lines.append((index,tokens))
+            if section.kind=='global' and tokens[:1]==['ssl-server-verify'] and len(tokens)==2:
+                global_verify=tokens[1]!='none';inherited['server_verify']=global_verify
             if tokens[0]=='mode' and len(tokens)==2:
                 section.mode=tokens[1]
             if tokens[0]=='balance':section.balance=tokens[1] if len(tokens)==2 and tokens[1] in ('roundrobin','leastconn','source') else None
@@ -136,8 +143,10 @@ def parse_sections(config):
                     except (ValueError,IndexError):pass
                 if 'ssl' in tokens:section.server_tls=True
                 if 'no-ssl' in tokens:section.server_tls=False
+                if 'verify' in tokens and tokens.index('verify')+1<len(tokens):section.server_verify=tokens[tokens.index('verify')+1]!='none'
+                if 'ca-file' in tokens and tokens.index('ca-file')+1<len(tokens):section.server_ca_file=tokens[tokens.index('ca-file')+1]
         if sections and sections[-1].kind=='defaults':
-            s=sections[-1];inherited={key:getattr(s,key) for key in ('mode','balance','default_weight','server_tls')};defaults[s.name]=inherited.copy()
+            s=sections[-1];inherited={key:getattr(s,key) for key in ('mode','balance','default_weight','server_tls','server_verify','server_ca_file')};defaults[s.name]=inherited.copy()
     if sections:sections[-1].end=len(lines)
     return lines,sections
 
@@ -223,7 +232,9 @@ def extract_backends(config):
                 if len(t)<3 or any(c in lines[index] for c in ('"',"'",'\\')):raise ValueError('Komplexe Maskierung')
                 address,port=endpoint(t[2]); weight=default_weight
                 if 'weight' in t:weight=int(t[t.index('weight')+1])
-                servers.append(ImportedServer(name=t[1],address=address,port=port,weight=weight,tls='ssl' in t[3:] or s.server_tls and 'no-ssl' not in t[3:]))
+                options=t[3:]
+                verify=options[options.index('verify')+1]!='none' if 'verify' in options else s.server_verify
+                servers.append(ImportedServer(name=t[1],address=address,port=port,weight=weight,tls_verify=verify,tls='ssl' in t[3:] or s.server_tls and 'no-ssl' not in t[3:]))
             except (ValueError,IndexError):warnings.append(f'{s.name}: Server {t[1] if len(t)>1 else "?"} bleibt unverändert im Texteditor.')
         # Ambiguous server names cannot be edited safely.
         duplicates={sv.name for sv in servers if sum(other.name==sv.name for other in servers)>1}
@@ -284,6 +295,8 @@ def generate_imported(doc):
         for server in edited.servers:
             before=old_servers[server.name]
             if server.tls!=before.tls:raise ValueError('TLS-Optionen einer übernommenen Verbindung im Texteditor ändern.')
+            verify=before.tls_verify if server.tls_verify is None else server.tls_verify
+            if verify!=before.tls_verify and not server.tls:raise ValueError('Zertifikatsprüfung kann nur für eine TLS-Verbindung geändert werden.')
             if server==before:continue
             index=next(i for i,t in section.lines if t[0]=='server' and t[1]==server.name)
             line=lines[index]; match=re.match(r'(\s*server\s+\S+\s+)(\S+)([^\r\n]*)(\r?\n)?$',line)
@@ -292,6 +305,13 @@ def generate_imported(doc):
             if server.weight!=before.weight:
                 if re.search(r'\sweight\s+\d+(?=\s|$)',body):body=re.sub(r'(\sweight\s+)\d+(?=\s|$)',lambda m:m[1]+str(server.weight),body,count=1)
                 else:body=body.rstrip()+' weight '+str(server.weight)+(' ' if sep else '')
+            if verify!=before.tls_verify:
+                pattern=r'(?<!\S)verify\s+(?:none|required)(?=\s|$)'
+                value='verify '+('required' if verify else 'none')
+                if re.search(pattern,body):body=re.sub(pattern,value,body,count=1)
+                else:body=body.rstrip()+' '+value+(' ' if sep else '')
+                if verify and not re.search(r'(?<!\S)ca-file\s+',body) and not section.server_ca_file:
+                    body=body.rstrip()+' ca-file /etc/ssl/certs/ca-certificates.crt'+(' ' if sep else '')
             patch[index]=match[1]+addr+body+sep+comment+(match[4] or '')
     rules,_,_=map_routes(original,[m.model_dump() for m in doc.imported_maps])
     valid_fronts={rule['frontend'] for rule in rules};back_names={s.name for s in sections if s.kind in ('backend','listen')}

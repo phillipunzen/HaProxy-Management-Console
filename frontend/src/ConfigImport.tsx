@@ -1,10 +1,11 @@
+import {BackendTLSOptions} from './BackendTLSOptions';
 import {HostnameAliases,HostnameList,hostnames} from './Hostnames';
 import { CertificateSelector, type Certificate } from './Certificates';
 import { useEffect, useRef, useState } from 'react';
 import { BasicAuthSelector, type BasicGroup } from './BasicAuth';
 import { FileCode2, Loader2, Upload, Check, Settings2, Plus, Trash2, Terminal, Copy, RefreshCw } from 'lucide-react';
 
-export type ImportedBackend={name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean}[]};
+export type ImportedBackend={name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean;tls_verify?:boolean|null}[]};
 export type ImportedRoute={id:string;frontend:string;domain:string;aliases?:string[];backend:string;basic_auth_group?:number|null;basic_auth_forward?:boolean;basic_auth_replace_existing?:boolean;certificate?:string|null};
 export type ExistingAuth={kind:string;name:string;rules:string[]};
 export type ImportedFields={imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[];basic_auth_existing?:ExistingAuth[]};
@@ -89,6 +90,7 @@ export function ImportedBackendForm({initial,busy,onClose,onSave}:{initial:Impor
       {backend.servers.map((s,i)=><div className="form-grid imported-server-edit" key={s.name}>
         <strong>{s.name}{s.tls?' · TLS':''}</strong>
         {(['address','port','weight'] as const).map(key=><div className="field" key={key}><label htmlFor={`import-${i}-${key}`}>{key==='address'?'Zieladresse':key==='port'?'Port':'Gewicht'}</label><input id={`import-${i}-${key}`} required type={key==='address'?'text':'number'} min={key==='port'?1:0} max={key==='port'?65535:256} value={s[key]} onChange={e=>setBackend({...backend,servers:backend.servers.map((sv,j)=>i===j?{...sv,[key]:key==='address'?e.target.value:Number(e.target.value)}:sv)})}/></div>)}
+      {s.tls&&<BackendTLSOptions tls verify={s.tls_verify} onVerify={tls_verify=>setBackend({...backend,servers:backend.servers.map((sv,j)=>i===j?{...sv,tls_verify}:sv)})}/>}
       </div>)}
       <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>Abbrechen</button><button type="submit" className="button">{busy&&<Loader2 size={16} className="spin"/>}Im Entwurf speichern</button></div>
     </fieldset>

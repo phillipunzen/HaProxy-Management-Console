@@ -153,3 +153,22 @@ def test_alias_collisions_include_imported_routes_but_allow_other_paths_and_fron
         Document(hosts=[base],imported_routes=[ImportedRoute(id='r',frontend='public_http',domain='www.example.com',backend='existing')])
     assert Document(hosts=[base,Host(id='path',domain='www.example.com',path='/admin',servers=[{'address':'192.0.2.1'}]),Host(id='other',frontend='other',domain='www.example.com',servers=[{'address':'192.0.2.1'}])])
     assert host().aliases==[]
+
+
+@pytest.mark.parametrize('source',['host','pool','imported_frontend'])
+@pytest.mark.parametrize('verify',[True,False])
+def test_backend_certificate_verification_is_per_target_and_sni_is_retained(source,verify):
+    server={'address':'origin.example.com','port':443,'tls':True,'tls_verify':verify}
+    plain={'address':'192.0.2.1','tls':False,'tls_verify':False}
+    if source=='pool':doc=Document(backends=[ManagedBackend(name='origin',servers=[server,plain])])
+    else:
+        doc=imported_with_tls() if source=='imported_frontend' else Document()
+        doc.hosts=[Host(id='origin',frontend='fe_https' if source=='imported_frontend' else 'public_http',domain='app.example.com',servers=[server,plain])]
+    config=generate(doc,CAP)
+    line=next(line for line in config.splitlines() if 'server srv_1 origin.example.com' in line)
+    assert 'sni str(origin.example.com)' in line
+    if verify:assert 'verify required ca-file /etc/ssl/certs/ca-certificates.crt' in line and 'verifyhost origin.example.com' in line
+    else:assert 'ssl verify none' in line and 'ca-file' not in line and 'verifyhost' not in line
+    line=next(line for line in config.splitlines() if 'server srv_2 192.0.2.1' in line)
+    assert ' ssl ' not in line and 'verify' not in line
+    assert BackendServer(address='origin.example.com',tls=True).tls_verify is True

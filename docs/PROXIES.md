@@ -49,3 +49,10 @@ Die Anwendung erzeugt eine domainbezogene `crt-list`: Ein gewähltes Zertifikat 
 TLS erfolgt vor der URL-Auswertung. Für dieselbe Domain am selben Frontend kann deshalb nur ein Zertifikat ausgewählt werden; verschiedene Zertifikate für `/` und `/admin` werden abgelehnt.
 
 Für diese Funktion sowohl den Management-Container als auch den Agenten aktualisieren. Den Agent-Befehl findest du unter **Server → Agent aktualisieren**. Alte Agenten werden bei der Erzeugung mit einer verständlichen Meldung erkannt. Es sind keine neuen ENV-Variablen oder Tokens erforderlich. Eigene `crt-list`-/`crt-store`-Definitionen bleiben weiterhin manuell verwaltet. Erzeugte Konfigurationen verwenden zusätzlich die vom Agenten bereitgestellten Listen; bei manuellen Dateiexporten diese Dateien ebenfalls übernehmen.
+
+
+## TLS zum Backend und Insecure verify
+
+TLS am Zielserver verschlüsselt die Verbindung von HAProxy zum Backend. Bei Proxy Hosts und eigenen Backend-Pools erscheint nach Aktivieren von **TLS** bzw. **Ziel-TLS** die Option **Zertifikat nicht prüfen (Insecure verify)**. Sie gilt pro Zielserver und erzeugt `ssl verify none`, beispielsweise für interne Dienste mit selbstsignierten Zertifikaten. Ohne diese Auswahl bleibt `verify required` mit dem System-CA-Bundle aktiv. Bei Hostnamen wird SNI auch ohne Zertifikatsprüfung gesendet.
+
+Bei übernommenen Backend-Pools wird die vorhandene Zertifikatsprüfung aus `server`, `default-server` und `ssl-server-verify` erkannt. Bei bestehenden TLS-Zielen lässt sie sich im Backend-Dialog ändern; zusätzliche Serveroptionen und Kommentare bleiben erhalten. TLS selbst und komplexe TLS-Parameter einer übernommenen Verbindung weiterhin im Texteditor ändern. Ältere gespeicherte Import-Entwürfe behalten ihre ursprüngliche Prüfung. Diese Option betrifft die Backend-Verbindung; die HTTPS-Zertifikate der Website werden weiter separat verwaltet.

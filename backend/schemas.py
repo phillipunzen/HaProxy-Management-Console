@@ -127,6 +127,7 @@ class BackendServer(BaseModel):
     port: int = Field(ge=1, le=65535, default=80)
     weight: int = Field(ge=1, le=256, default=100)
     tls: bool = False
+    tls_verify: bool = True
 
     @field_validator('address')
     @classmethod
@@ -217,6 +218,8 @@ class Rule(BaseModel):
         return self
 
 class ImportedServer(BackendServer):
+    # None means retain the original policy for drafts saved before this field.
+    tls_verify: bool | None = None
     name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     weight: int = Field(default=1,ge=0,le=256)
 
@@ -326,6 +329,13 @@ class Document(BaseModel):
 
     @model_validator(mode='after')
     def unique_ids(self):
+        if any(s.tls_verify is None for b in self.imported_backends for s in b.servers):
+            from backend.haproxy_config import extract_backends
+            original,_=extract_backends(self.imported_config or '')
+            policies={(b.name,s.name):s.tls_verify for b in original for s in b.servers}
+            for b in self.imported_backends:
+                for s in b.servers:
+                    if s.tls_verify is None:s.tls_verify=policies.get((b.name,s.name),True)
         for items in (self.hosts, self.rules, self.imported_routes):
             if len({x.id for x in items}) != len(items):
                 raise ValueError('IDs müssen eindeutig sein.')

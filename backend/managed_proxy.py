@@ -9,10 +9,10 @@ def endpoint(host,port):return f'[{host}]:{port}' if ':' in host else f'{host}:{
 
 
 def servers(values):
+    from backend.generator import backend_tls
     result=[]
     for index,s in enumerate(values):
-        tls=' ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt' if s.tls else ''
-        if s.tls and ':' not in s.address and not s.address.replace('.','').isdigit():tls+=f' sni str({s.address}) verifyhost {s.address}'
+        tls=backend_tls(s)
         result.append(f'    server srv_{index+1} {endpoint(s.address,s.port)} weight {s.weight} check{tls}')
     return result
 

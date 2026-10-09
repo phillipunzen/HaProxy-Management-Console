@@ -406,7 +406,8 @@ def config(id:int,user=Depends(operator),db=Depends(get_db)): return agent(insta
 def document(id:int,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id)
     recover_applied_document(db,i)
-    return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
+    draft=Document.model_validate(i.document).model_dump(exclude={'version'})
+    return draft|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
 
 def without_migration(config):
     return ''.join(line for line in config.splitlines(keepends=True) if not line.startswith(MIGRATION_PREFIX))

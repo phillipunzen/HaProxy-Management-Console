@@ -305,3 +305,42 @@ def test_multi_name_import_does_not_merge_differently_certified_domains():
     again=doc(generated)
     assert {(r.domain,r.certificate) for r in again.imported_routes}=={('pc-wiki.de','one'),('www.pc-wiki.de','two')}
     assert all(not r.aliases for r in again.imported_routes)
+
+
+@pytest.mark.parametrize('global_value',['','global\n ssl-server-verify none\n'])
+@pytest.mark.parametrize('default_value',['',' default-server ssl verify none\n',' default-server ssl verify required ca-file /custom/root.pem\n'])
+def test_imported_verification_inheritance_and_per_server_overrides(global_value,default_value):
+    original=global_value+'defaults named\n mode http\n'+default_value+'backend app from named\n server inherited 192.0.2.1:443 ssl\n server insecure 192.0.2.2:443 ssl verify none\n server secure 192.0.2.3:443 ssl verify required ca-file /custom/other.pem\n'
+    document=doc(original);servers=document.imported_backends[0].servers
+    inherited='verify required' in default_value or not default_value and not global_value
+    assert [s.tls_verify for s in servers]==[bool(inherited),False,True]
+    # Old saved JSON must inherit policy, without silently enabling verification.
+    old=document.model_dump()
+    for server in old['imported_backends'][0]['servers']:server.pop('tls_verify')
+    restored=Document.model_validate(old)
+    assert [s.tls_verify for s in restored.imported_backends[0].servers]==[bool(inherited),False,True]
+    assert generate(restored,{})==original
+    servers[0].tls_verify=not inherited
+    updated=generate(document,{})
+    line=next(line for line in updated.splitlines() if 'server inherited' in line)
+    assert 'verify '+('none' if inherited else 'required') in line
+    if not inherited and 'ca-file' not in default_value:assert 'ca-file /etc/ssl/certs/ca-certificates.crt' in line
+    assert 'server insecure 192.0.2.2:443 ssl verify none' in updated
+    assert 'server secure 192.0.2.3:443 ssl verify required ca-file /custom/other.pem' in updated
+    assert doc(updated).imported_backends[0].servers[0].tls_verify is (not inherited)
+
+
+def test_imported_verification_edit_preserves_ca_sni_healthchecks_comments_and_line_endings():
+    original='defaults\r\n mode http\r\nbackend app\r\n server web origin.example.com:443 check ssl verify required ca-file /custom/root.pem sni str(origin.example.com) verifyhost origin.example.com inter 3s backup # preserve\r\n'
+    document=doc(original);document.imported_backends[0].servers[0].tls_verify=False
+    updated=generate(document,{})
+    assert updated==original.replace('verify required','verify none')
+    assert generate(doc(updated),{})==updated
+    document=doc(updated);document.imported_backends[0].servers[0].tls_verify=True
+    assert generate(document,{})==original
+
+
+def test_imported_plaintext_verification_change_is_rejected():
+    document=doc('defaults\n mode http\nbackend app\n server web 192.0.2.1:80 check\n')
+    document.imported_backends[0].servers[0].tls_verify=False
+    with pytest.raises(ValueError,match='TLS-Verbindung'):generate(document,{})

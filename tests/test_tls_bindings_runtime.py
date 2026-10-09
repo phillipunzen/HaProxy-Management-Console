@@ -121,3 +121,54 @@ backend shared
     finally:
         if process:process.terminate();process.wait(timeout=10)
         if kind=='docker':subprocess.run(['docker','rm','-f',container],capture_output=True)
+
+@pytest.mark.parametrize('kind',['native','docker'])
+@pytest.mark.parametrize('source',['host','pool','imported'])
+def test_backend_self_signed_certificate_requires_explicit_insecure_choice(tmp_path,kind,source):
+    import http.server
+    import threading
+    import httpx
+    from backend.schemas import Host,ManagedBackend,ManagedFrontend
+    from test_basic_auth_runtime import HTTP
+    tmp_path.chmod(0o755)
+    pem=tmp_path/'backend.pem';certificate(pem,['internal.example.com'],20)
+    web=http.server.ThreadingHTTPServer(('127.0.0.1',0),HTTP)
+    context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(pem)
+    web.socket=context.wrap_socket(web.socket,server_side=True)
+    threading.Thread(target=web.serve_forever,daemon=True).start()
+    hp=port();container='haproxy-backend-tls-lab-'+secrets.token_hex(5)
+    caps={'runtime_socket_config':('/etc/haproxy' if kind=='docker' else str(tmp_path))+'/admin.sock','cert_dir_config':'/etc/haproxy/certs'}
+    target={'address':'127.0.0.1','port':web.server_address[1],'tls':True}
+    if source=='host':doc=Document(http_port=hp,hosts=[Host(id='app',domain='app.example.com',servers=[target])])
+    elif source=='pool':doc=Document(http_port=port(),frontends=[ManagedFrontend(name='edge',port=hp,backend='app')],backends=[ManagedBackend(name='app',servers=[target])])
+    else:
+        original=f'defaults\n mode http\n timeout connect 1s\n timeout client 5s\n timeout server 5s\nfrontend edge\n bind 127.0.0.1:{hp}\n default_backend app\nbackend app\n server origin 127.0.0.1:{web.server_address[1]} ssl verify required ca-file /etc/ssl/certs/ca-certificates.crt check\n'
+        doc=Document.model_validate(import_config(original,hashlib.sha256(original.encode()).hexdigest())['document'])
+    selected=(doc.hosts[0] if source=='host' else doc.backends[0] if source=='pool' else doc.imported_backends[0]).servers[0]
+    config_file=tmp_path/'haproxy.cfg'
+    try:
+        for verify in (True,False,True):
+            selected.tls_verify=verify;config_file.write_text(generate(doc,caps));process=None;started=False
+            try:
+                if kind=='native':
+                    result=subprocess.run([BINARY,'-c','-f',str(config_file)],capture_output=True,text=True);assert result.returncode==0,result.stderr
+                    process=subprocess.Popen([BINARY,'-db','-f',str(config_file)],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+                else:
+                    subprocess.run(['docker','run','-d','--name',container,'--user','0','--network','host','-v',str(tmp_path)+':/etc/haproxy','haproxy:3.2.25','haproxy','-db','-f','/etc/haproxy/haproxy.cfg'],check=True,capture_output=True);started=True
+                with httpx.Client(trust_env=False,timeout=3) as client:
+                    for _ in range(100):
+                        try:
+                            response=client.get(f'http://127.0.0.1:{hp}',headers={'Host':'app.example.com'})
+                            if response.status_code==(503 if verify else 200):break
+                        except httpx.RequestError:pass
+                        time.sleep(.1)
+                    else:raise AssertionError(f'Expected verify={verify} to reject/accept the self-signed backend')
+                    if not verify:assert response.json()['authorization'] is None
+                if source=='imported':
+                    again=Document.model_validate(import_config(config_file.read_text(),hashlib.sha256(config_file.read_bytes()).hexdigest())['document'])
+                    assert again.imported_backends[0].servers[0].tls_verify is verify
+            finally:
+                if process:process.terminate();process.wait(timeout=10)
+                if started:subprocess.run(['docker','rm','-f',container],capture_output=True)
+    finally:
+        web.shutdown();web.server_close()
