@@ -12,6 +12,8 @@ import time
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding
 from agent import main as agent
+from agent import certificates as certificate_jobs
+from fastapi import HTTPException
 from backend.generator import generate
 from backend.haproxy_config import import_config
 from backend.schemas import Document
@@ -53,6 +55,7 @@ backend shared
 '''
     primary.write_text(original);state=tmp_path/'state';state.mkdir();monkeypatch.setattr(agent,'STATE_DIR',state)
     p={'kind':kind,'config_path':str(primary),'config_sources':[str(primary)],'cert_dir':str(directory),'cert_dir_config':prefix+'/certs','runtime_socket':str(runtime/'admin.sock'),'haproxy_binary':BINARY,'container':container,'container_config_dir':prefix,'cert_uid':99 if kind=='docker' else os.getuid(),'cert_gid':99 if kind=='docker' else os.getgid()}
+    monkeypatch.setattr(agent,'PROFILES',{'test':p})
     doc=Document.model_validate(import_config(original,agent.sha(original))['document']);doc.imported_routes[0].certificate='chosen';generated=generate(doc,{'cert_dir_config':prefix+'/certs'})
     process=None
     ctx=ssl.create_default_context();ctx.check_hostname=False;ctx.verify_mode=ssl.CERT_NONE
@@ -92,6 +95,11 @@ backend shared
         assert fingerprint('unknown.invalid')==digest(default)
         assert fingerprint(None)==digest(default)
         assert fingerprint('app.example.com',listener=other)==digest(default)
+        with pytest.raises(HTTPException) as error:certificate_jobs.delete(p,'chosen')
+        assert error.value.status_code==409 and (directory/'chosen.pem').exists()
+        staging=directory/'.staging';staging.mkdir();certificate(staging/'chosen.pem',domains,5)
+        assert certificate_jobs.delete(p,'chosen',staging=True)['deleted']
+        assert (directory/'chosen.pem').exists() and fingerprint('app.example.com')==digest(chosen)
         again=Document.model_validate(import_config(primary.read_text(),agent.sha(primary.read_text()))['document'])
         assert again.imported_routes[0].certificate=='chosen'
         renewal=tmp_path/'renewal.pem';replacement=certificate(renewal,domains,3)
@@ -102,6 +110,9 @@ backend shared
         cleared=generate(again,{'cert_dir_config':prefix+'/certs'})
         agent.apply('test',agent.ConfigIn(config=cleared,expected_hash=agent.sha(primary.read_text())),p)
         assert fingerprint('app.example.com')==digest(default)
+        assert certificate_jobs.delete(p,'chosen')['deleted']
+        assert not (directory/'chosen.pem').exists()
+        assert fingerprint('other.example.com')==digest(default)
     finally:
         if process:process.terminate();process.wait(timeout=10)
         if kind=='docker':subprocess.run(['docker','rm','-f',container],capture_output=True)

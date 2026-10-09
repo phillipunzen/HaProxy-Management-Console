@@ -216,6 +216,119 @@ def test_renewal_policy_and_manual_pem_cancel_previous_job(lego_profile):
     assert jobs.status(p,'cert',False)['engine']=='manual' and list(jobs.entries(p))==['staging']
 
 
+@pytest.fixture
+def delete_profile(tmp_path,monkeypatch):
+    directory=tmp_path/'certs';directory.mkdir();(directory/'.staging').mkdir()
+    config=tmp_path/'haproxy.cfg';config.write_text('frontend http\n bind :80\n')
+    p={'kind':'native','config_path':str(config),'cert_dir':str(directory),'cert_dir_config':str(directory)}
+    monkeypatch.setattr(a,'STATE_DIR',tmp_path);monkeypatch.setattr(a,'PROFILES',{'edge':p})
+    monkeypatch.setattr(a,'runtime',lambda *args:'# filename\n')
+    monkeypatch.setattr(a,'read_bundle',lambda *args:{'config':config.read_text()})
+    monkeypatch.setattr(a,'validate',lambda *args:'valid')
+    for staging,folder in ((False,directory),(True,directory/'.staging')):
+        (folder/'site.pem').write_bytes(b'stage' if staging else b'production')
+    jobs.save_entries(p,{'production':{'name':'site','staging':False},'stage':{'name':'site','staging':True},'other':{'name':'other','staging':False}})
+    return p
+
+
+@pytest.mark.parametrize('staging',[False,True])
+def test_delete_only_selected_environment_and_job(delete_profile,monkeypatch,staging):
+    p=delete_profile;directory=Path(p['cert_dir']);called=[]
+    folder=directory/'.staging' if staging else directory
+    def validate(*args):
+        assert not (folder/'site.pem').exists();called.append('validated')
+    monkeypatch.setattr(a,'validate',validate)
+    monkeypatch.setattr(a,'reload_service',lambda *args:pytest.fail('Unused certificate deletion needs no reload'))
+    dns=Path(p['config_path']).parent/'credentials';dns.write_bytes(b'token')
+    assert jobs.delete(p,'site',staging)=={'deleted':True,'name':'site','staging':staging}
+    assert called==['validated'] and not (folder/'site.pem').exists()
+    other=directory if staging else directory/'.staging'
+    assert (other/'site.pem').read_bytes()==(b'production' if staging else b'stage')
+    assert set(jobs.entries(p))==({'production','other'} if staging else {'stage','other'})
+    assert dns.read_bytes()==b'token' and not list(folder.glob('.control-delete-*'))
+    assert jobs.status(p,'site',staging)['managed'] is False
+    assert jobs.status(p,'site',not staging)['managed'] is True
+
+
+@pytest.mark.parametrize('kind',['native','docker'])
+@pytest.mark.parametrize('transaction',[False,True])
+def test_loaded_certificate_blocks_delete(delete_profile,monkeypatch,kind,transaction):
+    p=delete_profile;p['kind']=kind
+    if kind=='docker':p['cert_dir_config']='/etc/haproxy/certs'
+    loaded=('*' if transaction else '')+p['cert_dir_config']+'/site.pem'
+    monkeypatch.setattr(a,'runtime',lambda *args:'# transaction\n# filename\n'+loaded)
+    monkeypatch.setattr(a,'validate',lambda *args:pytest.fail('Loaded cert must not be removed'))
+    before=a.cert_state(p).read_bytes()
+    with pytest.raises(HTTPException) as error:jobs.delete(p,'site')
+    assert error.value.status_code==409 and Path(p['cert_dir'],'site.pem').read_bytes()==b'production'
+    assert a.cert_state(p).read_bytes()==before
+
+
+@pytest.mark.parametrize('directory',[False,True])
+def test_config_reference_blocks_delete(delete_profile,directory):
+    p=delete_profile
+    value=p['cert_dir']+('/' if directory else '/site.pem')
+    Path(p['config_path']).write_text(f'frontend ssl\n bind :443 ssl crt "{value}"\n')
+    with pytest.raises(HTTPException) as error:jobs.delete(p,'site')
+    assert error.value.status_code==409 and Path(p['cert_dir'],'site.pem').exists()
+
+
+@pytest.mark.parametrize('failure',['validation','state','unlink'])
+def test_failed_deletion_restores_pem_permissions_and_job(delete_profile,monkeypatch,failure):
+    p=delete_profile;target=Path(p['cert_dir'],'site.pem');target.chmod(0o600);before=a.cert_state(p).read_bytes()
+    if failure=='validation':
+        def validate(*args):raise HTTPException(422,'crt-list refers to missing PEM')
+        monkeypatch.setattr(a,'validate',validate)
+    elif failure=='state':monkeypatch.setattr(jobs,'save_entries',lambda *args:(_ for _ in ()).throw(OSError('write failed')))
+    else:
+        unlink=Path.unlink
+        def fail(path,*args,**kwargs):
+            if path.name=='certificate.pem':raise OSError('delete failed')
+            return unlink(path,*args,**kwargs)
+        monkeypatch.setattr(Path,'unlink',fail)
+    with pytest.raises((HTTPException,OSError)):jobs.delete(p,'site')
+    assert target.read_bytes()==b'production' and target.stat().st_mode & 0o777==0o600
+    assert a.cert_state(p).read_bytes()==before and not list(target.parent.glob('.control-delete-*'))
+
+
+@pytest.mark.parametrize('problem',['runtime-offline','runtime-error','symlink','stage-directory-symlink','shared-profile','invalid-name','missing'])
+def test_delete_preconditions_leave_files_untouched(delete_profile,monkeypatch,problem):
+    p=delete_profile;name='site';staging=False
+    if problem=='runtime-offline':
+        def offline(*args):raise OSError('not connected')
+        monkeypatch.setattr(a,'runtime',offline)
+    elif problem=='runtime-error':monkeypatch.setattr(a,'runtime',lambda *args:'Permission denied')
+    elif problem=='symlink':
+        name='alias';Path(p['cert_dir'],'alias.pem').symlink_to('site.pem')
+    elif problem=='stage-directory-symlink':
+        stage=Path(p['cert_dir'],'.staging');(stage/'site.pem').unlink();stage.rmdir()
+        stage.symlink_to(Path(p['config_path']).parent,target_is_directory=True);staging=True
+    elif problem=='shared-profile':a.PROFILES['other']=p|{'config_path':p['config_path']+'.other'}
+    elif problem=='invalid-name':name='../site'
+    elif problem=='missing':name='absent'
+    before=a.cert_state(p).read_bytes()
+    with pytest.raises(HTTPException):jobs.delete(p,name,staging)
+    assert Path(p['cert_dir'],'site.pem').read_bytes()==b'production' and a.cert_state(p).read_bytes()==before
+
+
+def test_agent_delete_requires_token_and_profile_lock(delete_profile):
+    p=delete_profile;p['token']='t'*48
+    client=TestClient(a.app)
+    try:
+        assert client.delete('/profiles/edge/certificates/site?staging=true').status_code==401
+        with a.lock(p):
+            assert client.delete('/profiles/edge/certificates/site?staging=true',headers={'Authorization':'Bearer '+p['token']}).status_code==409
+        response=client.delete('/profiles/edge/certificates/site?staging=true',headers={'Authorization':'Bearer '+p['token']})
+        assert response.status_code==200 and response.json()['staging'] is True
+    finally:client.close()
+
+
+def test_delete_existing_domain_named_pem(delete_profile):
+    p=delete_profile;source=Path(p['cert_dir'],'site.pem');source.rename(source.with_name('example.com.pem'))
+    assert jobs.delete(p,'example.com')['deleted']
+    assert not source.with_name('example.com.pem').exists()
+
+
 def test_daily_schedule_uses_local_time_and_survives_restart_and_dst():
     settings=RenewalSettingsIn(schedule='daily',daily_time='03:15',timezone='Europe/Berlin')
     before=datetime(2026,10,9,0,0,tzinfo=timezone.utc)

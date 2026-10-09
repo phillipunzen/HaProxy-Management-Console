@@ -169,6 +169,57 @@ def test_certificate_management_api_uses_selected_profile_and_validates_requests
     client.headers.pop('X-CSRF-Token')
     assert client.post('/api/instances/1/certificates/renew',json={}).status_code==403
 
+
+@pytest.mark.parametrize('assignment',['host','imported-route','frontend'])
+def test_certificate_delete_blocks_draft_assignments_but_allows_staging(api,monkeypatch,assignment):
+    client,factory=api;calls=[]
+    doc={'hosts':[{'domain':'app.example.com','certificate':'site','enabled':False}]} if assignment=='host' else {'imported_routes':[{'domain':'app.example.com','certificate':'site'}]} if assignment=='imported-route' else {'frontend_certificates':{'edge':['site']}}
+    with factory() as db:
+        db.get(Instance,1).document=doc;db.commit()
+    def agent(i,path='',method='GET',body=None,timeout=10):
+        calls.append((i.id,i.profile,path,method));return {'certificate_delete':True,'deleted':True}
+    monkeypatch.setattr(main,'agent',agent)
+    response=client.delete('/api/instances/1/certificates/site')
+    assert response.status_code==409 and 'Entwurf' in response.json()['detail'] and calls==[]
+    assert client.delete('/api/instances/1/certificates/site?staging=true').status_code==200
+    assert calls[-1]==(1,'native','/certificates/site?staging=true','DELETE')
+    assert client.delete('/api/instances/1/certificates/bad!name').status_code==422
+
+
+def test_certificate_delete_old_agent_and_failed_agent_preserve_draft(api,monkeypatch):
+    from fastapi import HTTPException
+    client,factory=api
+    monkeypatch.setattr(main,'agent',lambda *args,**kwargs:{})
+    result=client.delete('/api/instances/1/certificates/site');assert result.status_code==422 and 'aktualisieren' in result.json()['detail']
+    def failed(i,path='',*args,**kwargs):
+        if not path:return {'certificate_delete':True}
+        raise HTTPException(409,'Zertifikat wird von HAProxy geladen.')
+    monkeypatch.setattr(main,'agent',failed)
+    assert client.delete('/api/instances/1/certificates/site').status_code==409
+    with factory() as db:assert db.get(Instance,1).document=={'hosts':[]}
+
+
+def test_certificate_delete_permissions_csrf_audit_and_target(api,monkeypatch):
+    from backend.db import Audit
+    client,factory=api;calls=[]
+    def agent(i,path='',method='GET',*args,**kwargs):
+        calls.append((i.id,i.profile,path,method));return {'certificate_delete':True,'deleted':True}
+    monkeypatch.setattr(main,'agent',agent)
+    csrf=client.headers.pop('X-CSRF-Token')
+    assert client.delete('/api/instances/1/certificates/site').status_code==403 and calls==[]
+    client.headers['X-CSRF-Token']=csrf
+    assert client.delete('/api/instances/1/certificates/site',headers={'Origin':'https://evil.example'}).status_code==403
+    assert client.delete('/api/instances/999/certificates/site').status_code==404
+    for role in ('viewer','operator'):
+        login=client.post('/api/auth/login',json={'username':role,'password':PASSWORD});assert login.status_code==200
+        client.headers['X-CSRF-Token']=login.json()['csrf']
+        response=client.delete('/api/instances/1/certificates/site')
+        assert response.status_code==(403 if role=='viewer' else 200)
+    assert calls[-1]==(1,'native','/certificates/site?staging=false','DELETE')
+    with factory() as db:
+        entry=db.scalar(select(Audit).where(Audit.action=='certificate.deleted'))
+        assert entry and entry.actor=='operator' and entry.target=='Existing edge'
+
 @pytest.mark.parametrize('domain,cert,expected',[
     ('app.example.com',{'domains':['*.example.com']},200),
     ('example.com',{'domains':['*.example.com']},422),

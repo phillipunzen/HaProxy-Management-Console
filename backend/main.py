@@ -617,6 +617,21 @@ def compact_metric_storage(user=Depends(admin),db=Depends(get_db)):
 @app.get('/api/instances/{id}/certificates')
 def certificates(id:int,user=Depends(current_user),db=Depends(get_db)): return agent(instance(db,id),'/certificates')
 
+@app.delete('/api/instances/{id}/certificates/{name}')
+def delete_certificate(id:int,name:str,staging:bool=False,user=Depends(operator),db=Depends(get_db)):
+    if not re.fullmatch(r'[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,249}',name):raise HTTPException(422,'Ungültiger Zertifikatsname.')
+    i=instance(db,id)
+    if not staging:
+        doc=i.document
+        uses=[f"Proxy Host {h.get('domain','')}" for h in doc.get('hosts',[]) if h.get('certificate')==name]
+        uses += [f"Domain {r.get('domain','')}" for r in doc.get('imported_routes',[]) if r.get('certificate')==name]
+        uses += [f'Frontend {f}' for f,names in doc.get('frontend_certificates',{}).items() if name in names]
+        if uses:raise HTTPException(409,'Zertifikat ist im Entwurf zugewiesen: '+', '.join(uses)+'. Zuerst diese Zuweisungen ändern und die Konfiguration prüfen und anwenden.')
+    if not agent(i).get('certificate_delete'):
+        raise HTTPException(422,'Für das Löschen von Zertifikaten zuerst unter Server den Agenten aktualisieren.')
+    result=agent(i,f'/certificates/{name}?staging={str(staging).lower()}','DELETE',timeout=65)
+    audit(db,user.username,'certificate.deleted',i.name,name+(' (Staging)' if staging else ' (Produktion)'));db.commit();return result
+
 @app.post('/api/instances/{id}/certificates/issue')
 def issue(id:int,body:CertificateIn,user=Depends(operator),db=Depends(get_db)):
     i=instance(db,id);audit(db,user.username,'certificate.issue.requested',i.name,','.join(body.domains));db.commit()

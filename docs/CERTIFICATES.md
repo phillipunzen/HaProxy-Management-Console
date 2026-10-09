@@ -42,6 +42,14 @@ Staging bleibt getrennt und wird nicht automatisch im Produktionslistener aktivi
 
 Für diese Funktionen einen aktuellen Agenten verwenden: **Server → Agent aktualisieren**, angezeigten Befehl auf dem HAProxy-Host ausführen. Profile und Tokens bleiben erhalten.
 
+## Zertifikate löschen
+
+In **Zertifikate** entfernt der Papierkorb nach Bestätigung das ausgewählte Produktions- oder Staging-PEM auf dem ausgewählten Server und seinen Erneuerungsauftrag. Gleichnamige Zertifikate der anderen Umgebung, Zertifikate anderer Server und gespeicherte DNS-Zugänge bleiben erhalten. Dafür Management-Container und **Server → Agent aktualisieren** auf den aktuellen Stand bringen.
+
+Zertifikate mit Zuweisung im grafischen Entwurf oder mit Verwendung durch HAProxy können nicht gelöscht werden. Zuerst die Zuordnung im Proxy Host bzw. Frontend ersetzen oder entfernen und die erzeugte Konfiguration prüfen und anwenden. Dies gilt auch für importierte Listener, Verzeichnis-Binds und CRT-Listen. Der Agent prüft die geladenen Zertifikate über den [HAProxy-Runtime-Socket](https://www.haproxy.com/documentation/haproxy-runtime-api/reference/show-ssl-cert/) und validiert zusätzlich die Konfiguration ohne die zu löschende Datei. Bei einem Fehler bleiben PEM und Auftrag erhalten. Die Löschung benötigt keinen Reload.
+
+Das Zertifikat wird bei der CA nicht widerrufen. Die ursprünglichen LEGO-/Certbot-Archive werden erhalten, da sie auch externe Aufträge verwenden können. Ein separat eingerichteter Cronjob oder Certbot-Timer wird durch die Löschung im Tool nicht abgeschaltet.
+
 ## Bestehenden LEGO-Auftrag übernehmen
 
 Unterstützt wird **LEGO v5** mit `lego run`, `--env-file`, `--cert.name` und `--renew-force`. Das entspricht dem gezeigten Cron-Befehl. LEGO bleibt auf dem HAProxy-Host installiert; im Management-Container wird es nicht benötigt. Vor einem Wechsel von LEGO v4 die offizielle [v5-Migrationsanleitung](https://go-acme.github.io/lego/migration/cli/) beachten. Eine Migration bestehender v4-Daten wird nicht automatisch durchgeführt; das Agent-Update installiert ein eigenes v5.5.2-Binary für neue Aufträge.

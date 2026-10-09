@@ -325,7 +325,7 @@ def capabilities(profile: str,p=Depends(auth)):
         'dns_providers':['cloudflare','hetzner'], 'http_challenge':bool(p.get('acme_webroot')),
         'dns_credentials_ui':True,'dns_credentials':certificate_jobs.credentials_public(p),
         'lego_adoption':bool(p.get('lego')),'lego_host_credentials':bool(p.get('lego',{}).get('env_file')),
-        'automatic_renewal':True,'certificate_management':True,'tls_site_bindings':True,'acme_engines':['certbot']+(['lego'] if certificate_jobs.lego_ready(p) else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
+        'automatic_renewal':True,'certificate_management':True,'certificate_delete':True,'tls_site_bindings':True,'acme_engines':['certbot']+(['lego'] if certificate_jobs.lego_ready(p) else []),'config_bundle':True,'certificate_scope_error':certificate_scope_error(p)}
 
 @app.get('/profiles/{profile}/config-bundle')
 def config_bundle(profile: str,p=Depends(auth)):
@@ -459,6 +459,10 @@ def certificates(profile: str,p=Depends(auth)):
 @app.post('/profiles/{profile}/certificates/issue')
 def issue_endpoint(profile: str,body: CertificateIn,p=Depends(auth)):
     with lock(p): return issue(p,body)
+
+@app.delete('/profiles/{profile}/certificates/{name}')
+def delete_certificate(profile:str,name:str,staging:bool=False,p=Depends(auth)):
+    with lock(p):return certificate_jobs.delete(p,name,staging)
 
 @app.post('/profiles/{profile}/certificates/import')
 def import_endpoint(profile: str,body: PemIn,p=Depends(auth)):

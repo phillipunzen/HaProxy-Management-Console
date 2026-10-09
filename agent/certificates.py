@@ -1,7 +1,10 @@
 """Profile-scoped ACME jobs and renewal schedules. Credentials stay on the host."""
 import json
+import os
 import re
+import shlex
 import shutil
+import tempfile
 import uuid
 from contextlib import contextmanager
 from datetime import datetime,timedelta,timezone
@@ -305,6 +308,59 @@ def forget(p,name):
     # a later scheduled check cannot silently overwrite it.
     values={k:e for k,e in entries(p).items() if e['name']!=name or e['staging']}
     save_entries(p,values)
+
+
+def delete(p,name,staging=False):
+    """Remove an unused profile PEM and its job; keep shared ACME source stores."""
+    a=services();a.require_certificate_scope(p)
+    if not re.fullmatch(r'[a-zA-Z0-9_-][a-zA-Z0-9_.-]{0,249}',name):
+        raise HTTPException(422,'Ungültiger Zertifikatsname.')
+    root=Path(p['cert_dir']).resolve()
+    directory=Path(p['cert_dir'])/('.staging' if staging else '')
+    target=directory/(name+'.pem')
+    if not directory.resolve().is_relative_to(root) or target.is_symlink():
+        raise HTTPException(409,'Verlinkte Zertifikate können nicht über die Oberfläche gelöscht werden.')
+    if not target.is_file():raise HTTPException(404,'Zertifikat auf diesem Server nicht gefunden.')
+    config_path=Path(p['cert_dir_config'])/('.staging' if staging else '')/(name+'.pem')
+    def matches(value):
+        value=Path(os.path.normpath(value.lstrip('*')))
+        return value==config_path or (p['kind']=='native' and value.resolve()==target.resolve())
+    try:loaded=a.runtime(p,'show ssl cert')
+    except OSError as error:
+        raise HTTPException(502,'Runtime-Socket nicht erreichbar; Zertifikatsnutzung kann nicht geprüft werden.') from error
+    if '# filename' not in loaded.splitlines():
+        raise HTTPException(422,'HAProxy liefert keine Zertifikatsliste. Runtime-Socket und HAProxy-Version prüfen.')
+    if any(matches(line.strip()) for line in loaded.splitlines() if line.strip() and not line.startswith('#')):
+        raise HTTPException(409,'Zertifikat wird von HAProxy geladen. Zuerst die Zuweisung entfernen und die Konfiguration prüfen und anwenden.')
+    bundle=a.read_bundle(p,a.run,a.sha)
+    # Directory binds implicitly assign every PEM, including new files not yet loaded.
+    for line in bundle['config'].splitlines():
+        try:tokens=shlex.split(line,comments=True)
+        except ValueError as error:raise HTTPException(422,'Aktive Konfiguration kann nicht geprüft werden.') from error
+        for index,token in enumerate(tokens[:-1]):
+            if token!='crt':continue
+            value=Path(os.path.normpath(tokens[index+1]))
+            if matches(str(value)) or value==config_path.parent or (p['kind']=='native' and value.resolve()==directory.resolve()):
+                raise HTTPException(409,'Zertifikat ist in der HAProxy-Konfiguration zugewiesen. Zuerst die Zuweisung entfernen und die Konfiguration prüfen und anwenden.')
+    state=a.cert_state(p);old_state=state.read_bytes() if state.exists() else None
+    values={k:e for k,e in entries(p).items() if (e['name'],bool(e['staging']))!=(name,staging)}
+    backup_dir=Path(tempfile.mkdtemp(prefix='.control-delete-',dir=directory))
+    backup=backup_dir/'certificate.pem'
+    try:
+        target.rename(backup)
+        # Also covers crt-lists, client certificates and other config fragments.
+        try:a.validate(p,Path(p['config_path']).read_text())
+        except HTTPException as error:
+            raise HTTPException(409,'HAProxy-Konfiguration ist ohne dieses Zertifikat nicht gültig. Zuweisungen im Frontend, in CRT-Listen und im Texteditor prüfen. Keine Löschung vorgenommen.') from error
+        save_entries(p,values)
+        backup.unlink()
+    except Exception:
+        if backup.exists():backup.rename(target)
+        if old_state is None:state.unlink(missing_ok=True)
+        else:a.atomic(state,old_state,0o600)
+        raise
+    finally:backup_dir.rmdir()
+    return {'deleted':True,'name':name,'staging':staging}
 
 
 def renew(p,name=None,force=False,automatic=False):
