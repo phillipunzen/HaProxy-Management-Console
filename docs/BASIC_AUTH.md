@@ -9,7 +9,7 @@ Unter **Basic Auth** verwaltest du Website-Benutzer und Benutzergruppen zentral 
 3. Die HAProxy-Instanz unter **Proxy Hosts** auswählen und die Website bearbeiten. Unter **Website-Zugang** die Gruppe auswählen und **Im Entwurf speichern** drücken. Bei importierten Konfigurationen unter **Übernommene Domain-Zuordnungen** den Einstellungsbutton neben der gewünschten Domain anklicken. Der Dialog **Domain-Zuordnung bearbeiten** zeigt den Zielserver und die Auswahl **Website-Zugang**; dort die Gruppe mit den gewünschten Benutzern zuweisen. Die aktuelle Zuordnung steht auch in der Spalte **Website-Zugang**.
 4. **Konfiguration erzeugen** wählen. Im Konfigurationseditor vergleichen und **Prüfen & anwenden** ausführen. Der Agent prüft die Konfiguration mit dem HAProxy des Zielhosts und führt einen Reload aus.
 
-Der Schutz gilt für die ausgewählte Website bzw. ihren Pfad. Andere Domains an einem gemeinsamen Backend bleiben öffentlich. TCP-Pools unterstützen keine HTTP-Basic-Authentifizierung. HTTP-Challenges für Let's Encrypt bleiben bei vom grafischen Editor erzeugten Hosts erreichbar; HTTPS-Weiterleitungen erfolgen vor der Anmeldung. Für importierte Konfigurationen bleiben bestehende Challenge- und Redirect-Regeln maßgeblich.
+Der Schutz gilt für die ausgewählte Website bzw. ihren Pfad. Andere Domains an einem gemeinsamen Backend behalten ihren bisherigen Website-Zugang. TCP-Pools unterstützen keine HTTP-Basic-Authentifizierung. HTTP-Challenges für Let's Encrypt bleiben bei vom grafischen Editor erzeugten Hosts erreichbar; HTTPS-Weiterleitungen erfolgen vor der Anmeldung. Für importierte Konfigurationen bleiben bestehende Challenge- und Redirect-Regeln maßgeblich.
 
 ## Änderungen auf Instanzen aktivieren
 
@@ -31,7 +31,18 @@ Die Passwortprüfung kostet Rechenzeit pro Anfrage. Bei stark frequentierten ges
 
 ## Vorhandene Konfigurationen und Update
 
-Vorhandene `userlist`-Abschnitte und eigene Authentifizierungsregeln bleiben beim Import im Text erhalten. Sie werden nicht automatisch zu zentralen Benutzern konvertiert. Ist eine Domain-Zuordnung grafisch bearbeitbar, kann sie anschließend eine zentrale Gruppe erhalten. Bereits vorhandene `http-request auth`-Regeln im betroffenen Frontend oder Backend müssen vorher im Texteditor abgestimmt werden; die Anwendung lehnt eine doppelte Authentifizierung ab.
+Vorhandene `userlist`-Abschnitte und eigene Authentifizierungsregeln bleiben beim Import im Text erhalten. Sie werden nicht automatisch zu zentralen Benutzern konvertiert. Ist eine Domain-Zuordnung grafisch bearbeitbar, kann sie anschließend eine zentrale Gruppe erhalten. Für bestehende Backend-Regeln bietet der Dialog **Domain-Zuordnung bearbeiten** eine ausdrückliche Umstellung:
+
+1. Unter **Proxy Hosts → Übernommene Domain-Zuordnungen** die betroffene Domain bearbeiten.
+2. Unter **Website-Zugang** die zentrale Gruppe auswählen. Der Dialog zeigt die vorhandenen Backend-Regeln an.
+3. **Vorhandene Backend-Anmeldung für diese Domain ersetzen** bestätigen und den Entwurf speichern.
+4. **Konfiguration erzeugen → Prüfen & anwenden** ausführen.
+
+Die zentrale Gruppe ersetzt die bisherigen Backend-Anmelderegeln ausschließlich für diese Domain am gewählten Frontend. Andere Domains und Frontends am selben Backend behalten die ursprünglichen Regeln, einschließlich ihrer Bedingungen und Reihenfolge. Bestehende Benutzer werden nicht automatisch in die zentrale Gruppe übernommen. Ohne Bestätigung bleibt die Erzeugung bei einem Konflikt gesperrt; die Meldung unter **Frontends & Backends** führt zu den Domain-Zuordnungen.
+
+Die ursprünglichen Regeln bleiben reversibel in markierten Blöcken erhalten. Nach erneutem Einlesen bleibt auch die bestätigte Umstellung erhalten. Entfernst du später die zentrale Gruppe, werden die ursprünglichen Backend-Anmelderegeln für diese Domain wieder wirksam; „keine zentrale Gruppe“ bedeutet bei solchen Imports daher nicht automatisch öffentlichen Zugang.
+
+Eigene Authentifizierungsregeln im **Frontend** sowie geerbte Regeln in **defaults** benötigen weiterhin eine manuelle Abstimmung. Änderungen an der ursprünglichen importierten Basis vornehmen und diese erneut einlesen. Änderungen nur im erzeugten Textentwurf ändern die gespeicherte Importbasis nicht.
 
 Nicht sicher kombinierbare geerbte `http-request`-Regeln in `defaults` werden bei der Erzeugung mit einem Hinweis abgelehnt. Diese Regeln bei Bedarf in die konkreten Frontend-/Backend-Abschnitte verschieben und erneut prüfen. Von dieser Anwendung erzeugter Basic-Auth-Schutz bleibt beim erneuten Einlesen erhalten, auch wenn einzelne Pfadrouten nur im Text bearbeitbar sind. Die Anwendung ersetzt ausschließlich ihre markierten Benutzerlisten und Authentifizierungsblöcke.
 

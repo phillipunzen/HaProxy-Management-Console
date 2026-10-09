@@ -36,6 +36,88 @@ class Echo(socketserver.BaseRequestHandler):
 def port():
     with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 
+
+@pytest.mark.parametrize('kind',['native','docker'])
+@pytest.mark.parametrize('condition',[
+    'if !{ http_auth(legacy) }',
+    'unless { http_auth(legacy) }',
+    'if !{ http_auth(legacy) } or { path /locked }',
+])
+def test_legacy_migration_preserves_other_domains_and_frontends(tmp_path,kind,condition):
+    web=http.server.ThreadingHTTPServer(('127.0.0.1',0),HTTP)
+    threading.Thread(target=web.serve_forever,daemon=True).start()
+    tmp_path.chmod(0o755);hp,other=port(),port()
+    original=f'''defaults
+ mode http
+ timeout connect 5s
+ timeout client 30s
+ timeout server 30s
+frontend edge
+ bind 127.0.0.1:{hp}
+ acl private hdr(host) -i private.example.com
+ use_backend shared if private
+ acl public hdr(host) -i public.example.com
+ use_backend shared if public
+frontend other
+ bind 127.0.0.1:{other}
+ default_backend shared
+backend shared
+ http-request auth realm "Legacy team" {condition}
+ http-request auth realm "Extra restriction" if {{ path /double }}
+ server web 127.0.0.1:{web.server_address[1]} check
+userlist legacy
+ user old insecure-password old-password
+'''
+    doc=Document.model_validate(import_config(original,hashlib.sha256(original.encode()).hexdigest())['document'])
+    selected=next(r for r in doc.imported_routes if r.domain=='private.example.com')
+    selected.basic_auth_group=1;selected.basic_auth_replace_existing=True
+    groups={1:{'id':1,'realm':'Central team','users':[{'username':'alice','hash':auth.hash_password(PASSWORD)}]}}
+    current=generate(doc,{},groups)
+    # Exercise the persisted/reimported form, as used after applying a draft.
+    again=Document.model_validate(import_config(current,hashlib.sha256(current.encode()).hexdigest())['document'])
+    config_file=tmp_path/'haproxy.cfg';config_file.write_text(generate(again,{},groups))
+    process=None;container=None
+    try:
+        if kind=='native':
+            result=subprocess.run([BINARY,'-c','-f',str(config_file)],capture_output=True,text=True)
+            assert result.returncode==0,result.stderr
+            process=subprocess.Popen([BINARY,'-W','-db','-f',str(config_file)],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        else:
+            container='haproxy-auth-migration-lab-'+secrets.token_hex(5)
+            subprocess.run(['docker','run','-d','--name',container,'--user','0','--network','host','-v',str(tmp_path)+':/etc/haproxy','haproxy:3.2.25','haproxy','-W','-db','-f','/etc/haproxy/haproxy.cfg'],check=True,capture_output=True)
+        with httpx.Client(trust_env=False,timeout=4) as client:
+            def request(domain,path='/',credentials=None,listener=hp):
+                return client.get(f'http://127.0.0.1:{listener}'+path,headers={'Host':domain},auth=credentials)
+            for _ in range(100):
+                try:
+                    if request('private.example.com').status_code==401:break
+                except httpx.RequestError:pass
+                time.sleep(.1)
+            else:raise AssertionError('HAProxy did not start')
+            assert request('private.example.com',credentials=('old','old-password')).status_code==401
+            assert request('private.example.com',credentials=('alice','wrong')).status_code==401
+            for path in ('/','/locked','/double'):
+                response=request('private.example.com',path,('alice',PASSWORD))
+                assert response.status_code==200,response.text
+                assert response.json()['authorization'] is None
+            # The same keep-alive client must not carry the bypass flag to another request.
+            assert request('public.example.com').status_code==401
+            assert request('public.example.com',credentials=('alice',PASSWORD)).status_code==401
+            assert request('public.example.com',credentials=('old','old-password')).status_code==200
+            assert request('public.example.com','/double',('old','old-password')).status_code==401
+            assert request('private.example.com',credentials=('alice',PASSWORD),listener=other).status_code==401
+            assert request('private.example.com',credentials=('old','old-password'),listener=other).status_code==200
+            if ' or ' in condition:assert request('public.example.com','/locked',('old','old-password')).status_code==401
+            # Disabling central auth restores both original challenges, even after import.
+            next(r for r in again.imported_routes if r.domain==selected.domain).basic_auth_group=None
+            cleared=generate(again,{})
+            assert 'txn.mgmt_' not in cleared
+            assert f'http-request auth realm "Legacy team" {condition}' in cleared
+    finally:
+        if process:process.terminate();process.wait(timeout=10)
+        if container:subprocess.run(['docker','rm','-f',container],capture_output=True)
+        web.shutdown();web.server_close()
+
 @pytest.mark.parametrize('kind',['native','docker'])
 @pytest.mark.parametrize('source',['generated','imported'])
 def test_real_site_authentication_and_preservation(tmp_path,kind,source):

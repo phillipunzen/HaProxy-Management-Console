@@ -85,3 +85,7 @@ Beim ersten Anwenden des importierten Entwurfs werden **alle erkannten geladenen
 Alle Originalinhalte und Maps werden auf dem Agenten in einem geschützten `bundle.json` unter `/var/lib/haproxy-control/backups/` gesichert. Scheitert Schreiben oder Reload, stellt der Agent alle Originaldateien samt Dateirechten wieder her und lädt die vorherige Konfiguration erneut.
 
 Die Versionshistorie enthält außerdem die vorherige **zusammengeführte Konfiguration**. **Als Entwurf laden → Prüfen & anwenden** stellt deren Verhalten wieder her; die Dateien bleiben dabei zusammengeführt. Zum Wiederherstellen der ursprünglichen Aufteilung auf dem Host die Originalinhalte aus der Agent-Sicherung an ihre gespeicherten Pfade zurückspielen, die vollständige Dateiliste mit HAProxy prüfen und erst danach neu laden. Vorhandene Konfigurationsdateien können Zugangsdaten enthalten; die Agent-Sicherungen entsprechend schützen.
+
+### Vorhandene Basic-Auth-Regeln umstellen
+
+Wenn ein importierter Backend-Pool bereits `http-request auth` verwendet, unter **Proxy Hosts** die Domain-Zuordnung bearbeiten, eine zentrale Gruppe auswählen und **Vorhandene Backend-Anmeldung für diese Domain ersetzen** bestätigen. Andere Domains und Frontends behalten ihre bisherigen Regeln. Anschließend **Konfiguration erzeugen → Prüfen & anwenden**. Die Umstellung und ursprünglichen Regeln bleiben beim erneuten Einlesen erhalten. Einzelheiten stehen in [BASIC_AUTH.md](BASIC_AUTH.md).

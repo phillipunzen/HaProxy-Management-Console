@@ -47,7 +47,7 @@ def hash_password(password):
 
 def bindings(doc):
     result=[{'kind':'host','frontend':h.frontend,'backend':'backend_'+h.id,'domain':h.domain,'path':h.path,'group':h.basic_auth_group,'forward':h.basic_auth_forward} for h in doc.hosts if h.enabled and h.basic_auth_group]
-    result += [{'kind':'route','domain':r.domain,'path':'/','frontend':r.frontend,'backend':r.backend,'group':r.basic_auth_group,'forward':r.basic_auth_forward} for r in doc.imported_routes if r.basic_auth_group]
+    result += [{'kind':'route','domain':r.domain,'path':'/','frontend':r.frontend,'backend':r.backend,'group':r.basic_auth_group,'forward':r.basic_auth_forward,**({'replace_existing':True} if r.basic_auth_replace_existing else {})} for r in doc.imported_routes if r.basic_auth_group]
     if doc.imported_config:
         old=read_metadata(doc.imported_config)
         if old:
@@ -89,7 +89,8 @@ def read_metadata(config):
         if any(not re.fullmatch(r'[1-9][0-9]*',key) or not re.fullmatch(r'[a-f0-9]{64}',value) for key,value in data['groups'].items()):raise ValueError()
         if not isinstance(data['sites'],list) or len(data['sites'])>2200 or digest(data['sites'])!=data['bindings']:raise ValueError()
         for site in data['sites']:
-            if set(site)!={'kind','frontend','backend','domain','path','group','forward'} or site['kind'] not in ('host','route'):raise ValueError()
+            if set(site)-{'replace_existing'}!={'kind','frontend','backend','domain','path','group','forward'} or site['kind'] not in ('host','route'):raise ValueError()
+            if 'replace_existing' in site and (site['kind']!='route' or site['replace_existing'] is not True):raise ValueError()
             if not isinstance(site['group'],int) or isinstance(site['group'],bool) or site['group']<1 or not isinstance(site['forward'],bool):raise ValueError()
             if not DOMAIN.fullmatch(site['domain']) or any(not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',site[k]) for k in ('frontend','backend')):raise ValueError()
             Host.path_ok(site['path'])
@@ -112,13 +113,41 @@ def strip_managed(config):
         text=line.strip()
         if text.startswith(PREFIX+'BEGIN '):
             if block:raise ValueError('Verschachtelte Basic-Auth-Blöcke. Konfiguration im Texteditor prüfen.')
-            block=text[len(PREFIX+'BEGIN '):];continue
+            block=text[len(PREFIX+'BEGIN '):]
+            # Legacy challenges are retained verbatim inside reversible blocks.
+            # Restore them before regeneration, including when a group is removed.
+            if block.startswith('legacy '):
+                try:
+                    original=base64.b64decode(block[7:],validate=True).decode()
+                    if '\n' in original.rstrip('\r\n') or '\r' in original.rstrip('\r\n') or shlex.split(original,comments=True)[:2]!=['http-request','auth']:raise ValueError()
+                except Exception as error:raise ValueError('Ungültige ursprüngliche Basic-Auth-Regel. Konfiguration erneut einlesen.') from error
+                result.append(original)
+            continue
         if text.startswith(PREFIX+'END '):
             if not block or text[len(PREFIX+'END '):]!=block:raise ValueError('Unvollständiger Basic-Auth-Block. Konfiguration im Texteditor prüfen.')
             block=None;continue
         if not block and not line.startswith(META):result.append(line)
     if block:raise ValueError('Unvollständiger Basic-Auth-Block. Konfiguration im Texteditor prüfen.')
     return ''.join(result)
+
+
+def existing_rules(config):
+    lines,sections=parse_sections(strip_managed(config or ''))
+    return [{'kind':s.kind,'name':s.name,'rules':[lines[i].strip() for i,t in s.lines if t[:2]==['http-request','auth']]} for s in sections if s.kind in ('frontend','backend','listen') and any(t[:2]==['http-request','auth'] for _,t in s.lines)]
+
+
+def legacy_challenge(line,skip,index):
+    # Keep the original if/unless expression intact, including OR expressions.
+    # Evaluate it at its original position and add the site gate separately.
+    match=re.match(r'''^(\s*http-request\s+auth(?:\s+realm\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s#]+))?)(?:\s+(if|unless)\s+(.+?))?\s*(?:#.*)?$''',line.rstrip('\r\n'))
+    if not match:raise ValueError('Die vorhandene Authentifizierungsregel kann nicht sicher umgestellt werden. Regel in der importierten Konfiguration prüfen und erneut einlesen.')
+    action,operator,condition=match.groups();variable='txn.mgmt_legacy_'+hashlib.sha256((skip+str(index)).encode()).hexdigest()[:16]
+    original=base64.b64encode(line.encode()).decode();block='legacy '+original
+    return '\n'.join([PREFIX+'BEGIN '+block,
+        '    http-request set-var('+variable+') bool(false)',
+        '    http-request set-var('+variable+') bool(true)'+(' '+operator+' '+condition if operator else ''),
+        action+' if { var('+variable+') -m bool } !{ var('+skip+') -m bool }',
+        PREFIX+'END '+block])+'\n'
 
 
 def inject(config,doc,groups=None):
@@ -129,9 +158,9 @@ def inject(config,doc,groups=None):
     fronts={s.name:s for s in sections if s.kind in ('frontend','listen')};rules={}
     for site in bindings(doc):
         if site['frontend'] not in fronts or fronts[site['frontend']].mode!='http':raise ValueError('Basic Auth benötigt ein HTTP-Frontend; TCP-Passthrough kann nicht geschützt werden.')
-        if any(t[:2]==['http-request','auth'] for _,t in fronts[site['frontend']].lines):raise ValueError('Im Frontend '+site['frontend']+' besteht bereits eine eigene Authentifizierungsregel. Vor der zentralen Zuordnung im Texteditor prüfen und entfernen.')
+        if any(t[:2]==['http-request','auth'] for _,t in fronts[site['frontend']].lines):raise ValueError('Im Frontend '+site['frontend']+' besteht bereits eine eigene Authentifizierungsregel. Diese in der ursprünglichen Konfiguration abstimmen und erneut einlesen; die Umstellung im Domain-Dialog gilt für Backend-Regeln.')
         condition=f"{{ fe_name -m str {site['frontend']} }} {{ hdr(host) -i {site['domain']} }}" if site['kind']=='route' else ''
-        rules.setdefault(site['backend'],[]).append((site['group'],condition,site['forward']))
+        rules.setdefault(site['backend'],[]).append((site['group'],condition,site['forward'],site.get('replace_existing',False)))
     userlists={s.name for s in sections if s.kind=='userlist'}
     output=[PREFIX+'BEGIN users']
     for id in sorted(required):
@@ -144,7 +173,8 @@ def inject(config,doc,groups=None):
     for name,entries in rules.items():
         section=targets.get(name)
         if not section or section.mode!='http':raise ValueError('Basic Auth benötigt einen vorhandenen HTTP-Backend-Pool.')
-        if any(t[:2]==['http-request','auth'] for _,t in section.lines):raise ValueError('Im Backend '+name+' besteht bereits eine eigene Authentifizierungsregel. Vor der zentralen Zuordnung im Texteditor prüfen und entfernen.')
+        legacy=[i for i,t in section.lines if t[:2]==['http-request','auth']]
+        if legacy and not all(replace for _,_,_,replace in entries):raise ValueError('Im Backend '+name+' besteht bereits eine eigene Authentifizierungsregel. Unter Proxy Hosts die betroffenen Domain-Zuordnungen bearbeiten, eine zentrale Gruppe wählen und „Vorhandene Backend-Anmeldung für diese Domain ersetzen“ bestätigen.')
         # Terminating HTTP actions inherited from defaults execute before local
         # rules; do not claim protection when they could bypass the challenge.
         inherited=[s for s in sections if s.kind=='defaults' and s.start<section.start]
@@ -153,13 +183,19 @@ def inject(config,doc,groups=None):
         checked=set()
         while selected_default and selected_default.name not in checked:
             checked.add(selected_default.name)
-            conditional=any(condition for _,condition,_ in entries)
+            conditional=any(condition for _,condition,_,_ in entries)
             if any(t[0]=='http-request' and (conditional or t[1:2] in (['allow'],['return'])) for _,t in selected_default.lines):
                 raise ValueError('HTTP-Regeln in den geerbten defaults können lokale Authentifizierung umgehen. Diese Regeln zuerst in den jeweiligen Proxy-Abschnitt verschieben.')
             header=shlex.split(lines[selected_default.start],comments=True)
             selected_default=next((s for s in sections if s.kind=='defaults' and s.name==header[header.index('from')+1]),None) if 'from' in header else None
         block=[PREFIX+'BEGIN backend '+name]
-        for id,condition,forward in entries:
+        if legacy:
+            skip='txn.mgmt_skip_'+hashlib.sha256(name.encode()).hexdigest()[:16]
+            if re.search(r'\btxn\.mgmt_(?:skip|legacy)_',config):raise ValueError('Namenskonflikt mit internen Basic-Auth-Variablen. Ursprüngliche Konfiguration prüfen.')
+            block.append('    http-request set-var('+skip+') bool(false)')
+            for _,condition,_,_ in entries:block.append('    http-request set-var('+skip+') bool(true)'+(' if '+condition if condition else ''))
+            for index in legacy:patch[index]=legacy_challenge(lines[index],skip,index)
+        for id,condition,forward,_ in entries:
             group=groups[id];checks=condition
             if group['users']:checks+=' !{ http_auth(mgmt_basic_g'+str(id)+') }'
             block.append(f"    http-request auth realm '{group['realm']}'"+(' if '+checks.strip() if checks.strip() else ''))
@@ -208,5 +244,5 @@ def restore_routes(doc):
     if old:
         for route in doc.imported_routes:
             match=next((s for s in old['sites'] if s['kind']=='route' and s['frontend']==route.frontend and s['domain']==route.domain and s['backend']==route.backend),None)
-            if match:route.basic_auth_group=match['group'];route.basic_auth_forward=match['forward']
+            if match:route.basic_auth_group=match['group'];route.basic_auth_forward=match['forward'];route.basic_auth_replace_existing=match.get('replace_existing',False)
     return doc

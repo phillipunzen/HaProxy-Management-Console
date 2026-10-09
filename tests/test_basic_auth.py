@@ -143,6 +143,47 @@ def test_marker_corruption_and_userlist_collisions_are_rejected():
     with pytest.raises(ValueError,match='Namenskonflikt'):generate(doc,{}, {1:group()})
 
 
+@pytest.mark.parametrize('challenge',[
+    ' http-request auth realm "Old team" if !{ http_auth(legacy) }',
+    ' http-request auth realm "Old team" unless { http_auth(legacy) }',
+    ' http-request auth if !{ http_auth(legacy) } or { path /locked }',
+    ' http-request auth',
+])
+def test_existing_backend_auth_requires_opt_in_and_survives_regeneration(challenge):
+    doc=imported_doc();doc.imported_config=doc.imported_config.replace('backend shared\n','backend shared\n'+challenge+'\n')
+    route=doc.imported_routes[0];route.basic_auth_group=1
+    assert auth.existing_rules(doc.imported_config)==[{'kind':'backend','name':'shared','rules':[challenge.strip()]}]
+    with pytest.raises(ValueError,match='Domain-Zuordnungen'):generate(doc,{}, {1:group()})
+    route.basic_auth_replace_existing=True
+    config=generate(doc,{}, {1:group()})
+    assert auth.strip_managed(config).count(challenge+'\n')==1
+    assert auth.existing_rules(config)==auth.existing_rules(doc.imported_config)
+    assert config.count(auth.PREFIX+'BEGIN legacy ')==1
+    assert auth.read_metadata(config)['sites'][0]['replace_existing'] is True
+    again=Document.model_validate(import_config(config,hashlib.sha256(config.encode()).hexdigest())['document'])
+    selected=next(r for r in again.imported_routes if r.domain==route.domain)
+    assert selected.basic_auth_group==1 and selected.basic_auth_replace_existing
+    regenerated=generate(again,{}, {1:group()})
+    assert regenerated.count(auth.PREFIX+'BEGIN legacy ')==1
+    selected.basic_auth_group=None
+    restored=generate(again,{})
+    assert challenge+'\n' in restored and 'txn.mgmt_' not in restored and auth.META not in restored
+    assert 'userlist legacy' in restored
+
+
+def test_existing_frontend_auth_cannot_be_bypassed_by_backend_migration():
+    doc=imported_doc();doc.imported_config=doc.imported_config.replace(' bind :8080\n',' bind :8080\n http-request auth unless { http_auth(legacy) }\n')
+    doc.imported_routes[0].basic_auth_group=1;doc.imported_routes[0].basic_auth_replace_existing=True
+    with pytest.raises(ValueError,match='Frontend incoming'):generate(doc,{}, {1:group()})
+
+
+def test_migration_rejects_internal_variable_collisions_and_corrupt_originals():
+    doc=imported_doc();doc.imported_routes[0].basic_auth_group=1;doc.imported_routes[0].basic_auth_replace_existing=True
+    doc.imported_config=doc.imported_config.replace('backend shared\n','backend shared\n http-request auth unless { http_auth(legacy) }\n http-request set-var(txn.mgmt_skip_any) bool(true)\n')
+    with pytest.raises(ValueError,match='Namenskonflikt'):generate(doc,{}, {1:group()})
+    with pytest.raises(ValueError,match='ursprüngliche'):auth.strip_managed(auth.PREFIX+'BEGIN legacy invalid!\n')
+
+
 @pytest.fixture
 def api():
     engine=create_engine('sqlite://',connect_args={'check_same_thread':False},poolclass=StaticPool)
@@ -166,6 +207,17 @@ def create_directory(client):
     g=client.post('/api/basic-auth/groups',json={'name':'Internal','realm':'Team'});assert g.status_code==201,g.text
     u=client.post('/api/basic-auth/users',json={'username':'alice','password':PASSWORD,'group_ids':[g.json()['id']]});assert u.status_code==201,u.text
     return g.json(),u.json()
+
+
+def test_document_exposes_original_rules_and_persists_explicit_migration(api):
+    client,factory=api;g,_=create_directory(client)
+    doc=imported_doc();doc.imported_config=doc.imported_config.replace('backend shared\n','backend shared\n http-request auth unless { http_auth(legacy) }\n')
+    doc.imported_routes[0].basic_auth_group=g['id'];doc.imported_routes[0].basic_auth_replace_existing=True
+    response=client.put('/api/instances/1/document',json=doc.model_dump())
+    assert response.status_code==200,response.text
+    assert response.json()['basic_auth_existing'][0]['name']=='shared'
+    assert client.get('/api/instances/1/document').json()['imported_routes'][0]['basic_auth_replace_existing'] is True
+    with factory() as db:assert 'basic_auth_existing' not in db.get(Instance,1).document
 
 
 def test_directory_crud_membership_and_hash_privacy(api):

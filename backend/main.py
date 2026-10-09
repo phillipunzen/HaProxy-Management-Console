@@ -404,7 +404,7 @@ def config(id:int,user=Depends(operator),db=Depends(get_db)): return agent(insta
 
 @app.get('/api/instances/{id}/document')
 def document(id:int,user=Depends(operator),db=Depends(get_db)):
-    i=instance(db,id);return i.document|{'version':i.document_version}
+    i=instance(db,id);return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
 
 @app.get('/api/instances/{id}/proxy-layout')
 def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
@@ -436,13 +436,15 @@ def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
 @app.put('/api/instances/{id}/document')
 def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)):
     basic_auth.lock_directory(db)
-    try:basic_auth.validate_document(db,body)
+    try:
+        basic_auth.validate_document(db,body)
+        existing=basic_auth.existing_rules(body.imported_config)
     except ValueError as error:raise HTTPException(422,str(error))
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
     if not i: raise HTTPException(404)
     if body.version!=i.document_version: raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
     i.document=body.model_dump(exclude={'version'});i.document_version+=1
-    audit(db,user.username,'document.saved',i.name);db.commit();return i.document|{'version':i.document_version}
+    audit(db,user.username,'document.saved',i.name);db.commit();return i.document|{'version':i.document_version,'basic_auth_existing':existing}
 
 @app.post('/api/instances/{id}/generate')
 def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):

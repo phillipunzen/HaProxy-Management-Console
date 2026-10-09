@@ -220,6 +220,7 @@ class ImportedRoute(BaseModel):
     backend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     basic_auth_group: int | None = Field(default=None,ge=1)
     basic_auth_forward: bool = False
+    basic_auth_replace_existing: bool = False
     certificate: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
 
     @field_validator('domain')
