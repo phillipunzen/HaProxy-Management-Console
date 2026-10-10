@@ -232,6 +232,8 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 .checkbox input { accent-color: var(--primary); width: 16px; height: 16px; flex-shrink: 0; }
 .checkbox-stack { display: flex; flex-direction: column; justify-content: center; gap: 9px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 23px; border-top: 1px solid #edf1f7; padding-top: 21px; }
+.backend-edit-actions { flex-wrap: wrap; }
+.backend-edit-actions > .danger { margin-right: auto; }
 .modal-copy { font-size: 13px; color: #64748b; line-height: 1.9; padding: 25px 27px 0; }
 .modal > .modal-actions { margin: 21px 27px 26px; }
 .form-section-title { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 17px; padding-top: 18px; border-top: 1px solid var(--line); }
