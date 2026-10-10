@@ -127,6 +127,25 @@ def test_first_import_and_edit_preserve_server_priority_limits_and_checks(mode,i
     assert restored.imported_backends[0].balance=='first'
     assert generate(restored,{})==updated
 
+
+@pytest.mark.parametrize('algorithm',['first','leastconn','source','hdr(host)'])
+@pytest.mark.parametrize('scope',['backend','defaults'])
+def test_null_balance_retains_original_algorithm_when_editing_other_parameters(algorithm,scope):
+    original=('defaults\n mode http\n'+(f' balance {algorithm}\n' if scope=='defaults' else '')+
+              'backend web\n'+(f' balance {algorithm} # keep\n' if scope=='backend' else '')+
+              ' server origin 192.0.2.1:80 weight 20 check inter 2s maxconn 10\n')
+    document=doc(original)
+    pool=document.imported_backends[0]
+    pool.balance=None
+    assert generate(document,{})==original
+    pool.servers[0].port=8080
+    updated=generate(document,{})
+    assert updated==original.replace('192.0.2.1:80','192.0.2.1:8080')
+    pool.balance='roundrobin'
+    changed=generate(document,{})
+    assert 'balance roundrobin' in changed
+    assert 'server origin 192.0.2.1:8080 weight 20 check inter 2s maxconn 10' in changed
+
 @pytest.mark.parametrize('content',['app.example.com be_app\napp.example.com be_default\n','*.example.com be_app\n','App.example.com be_app\n','app.example.com be_app extra\n'])
 def test_unsupported_map_is_preserved(content):
     document=doc(CONFIG+EXTRA,[{'path':MAPS[0]['path'],'content':content}])

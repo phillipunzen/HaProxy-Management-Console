@@ -304,8 +304,9 @@ def generate_imported(doc):
         old=lookup[edited.name]; section=next(s for s in sections if s.kind in ('backend','listen') and s.name==edited.name)
         if edited.mode!=old.mode or {s.name for s in old.servers}!={s.name for s in edited.servers}:
             raise ValueError('Modus und Servernamen einer übernommenen Konfiguration im Texteditor ändern.')
-        if edited.balance!=old.balance:
-            if edited.balance is None:raise ValueError('Einen unterstützten Algorithmus wählen.')
+        # None means keep the raw algorithm, including one recognized only by
+        # a newer parser since this draft was imported (for example "first").
+        if edited.balance is not None and edited.balance!=old.balance:
             indexes=[i for i,t in section.lines if t[0]=='balance']
             if len(indexes)>1:raise ValueError('Mehrere balance-Direktiven im Texteditor ändern.')
             if indexes:

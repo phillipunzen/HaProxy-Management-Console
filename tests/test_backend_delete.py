@@ -64,6 +64,27 @@ def test_tcp_imported_pool_deletes_default_but_keeps_unrelated_listener():
     assert 'web' in names(output)
 
 
+@pytest.mark.parametrize('algorithm',['first','leastconn','static-rr'])
+@pytest.mark.parametrize('target',['web','db'])
+def test_deletion_keeps_unknown_algorithm_from_older_draft_in_other_pool(algorithm,target):
+    original=CONFIG.replace('backend other\n','backend other\n balance '+algorithm+' # keep distribution\n')
+    doc=imported(original)
+    pool=next(b for b in doc.imported_backends if b.name=='other')
+    # Older imports stored None when their parser did not know an algorithm.
+    pool.balance=None
+    pool.servers[0].port=9099
+    changed,_=plan(doc,target)
+    output=generate(changed,CAP)
+    assert target not in names(output)
+    assert 'balance '+algorithm+' # keep distribution' in output
+    assert 'server other 127.0.0.1:9099 check' in output
+    assert '# keep this comment' in output
+    assert pool.balance is None and doc.removed_backends==[]
+    again=imported(output)
+    assert target not in names(generate(again,CAP))
+    assert 'balance '+algorithm+' # keep distribution' in generate(again,CAP)
+
+
 def test_map_routes_and_fallback_can_be_removed_in_separate_operations():
     config=CONFIG.replace(' acl app hdr(host) -i app.example.com www.example.com\n use_backend web if app\n acl route_other hdr(host) -i other.example.com\n use_backend other if route_other\n default_backend web',
                           ' use_backend %[req.hdr(host),lower,map(/etc/vhosts.map,fallback)]')+'backend fallback\n http-request return status 404\n'
@@ -157,6 +178,31 @@ def test_api_preview_versioned_delete_and_isolation_never_contacts_agent(api):
     stale=c.post('/api/instances/1/backend-delete',json={'name':'db','version':0});assert stale.status_code==409
     with factory() as db:assert db.get(Instance,1).document_version==1
     assert c.post('/api/instances/1/backend-delete',json={'name':'does-not-exist','version':1}).status_code==422
+
+
+def test_api_deletes_pool_from_draft_imported_before_first_support(api):
+    c,factory,state=api
+    from backend.db import Instance
+    original=CONFIG.replace('backend other\n','backend other\n balance first\n')
+    document=imported(original)
+    next(b for b in document.imported_backends if b.name=='other').balance=None
+    with factory() as db:
+        db.get(Instance,1).document=document.model_dump();db.commit()
+    preview=c.post('/api/instances/1/backend-delete-preview',json={'name':'web','version':0})
+    assert preview.status_code==200,preview.text
+    with factory() as db:
+        assert db.get(Instance,1).document==document.model_dump()
+        assert db.get(Instance,1).document_version==0
+    deleted=c.post('/api/instances/1/backend-delete',json={'name':'web','version':0})
+    assert deleted.status_code==200,deleted.text
+    saved=Document.model_validate(deleted.json())
+    assert saved.version==1 and saved.removed_backends==['web']
+    output=generate(saved,CAP)
+    assert 'web' not in names(output) and 'balance first' in output
+    with factory() as db:
+        assert db.get(Instance,2).document_version==0
+        assert db.get(Instance,1).document['imported_config']==original
+    assert state['calls']==[]
 
 
 def test_api_viewer_cannot_preview_or_delete(api):

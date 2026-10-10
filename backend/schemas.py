@@ -274,6 +274,7 @@ class ImportedBackend(BaseModel):
 
     name: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     mode: Literal['http','tcp','unknown']
+    # None preserves the original algorithm, even after parser support changes.
     balance: Literal['roundrobin','leastconn','source','first'] | None = 'roundrobin'
     servers: list[ImportedServer] = Field(max_length=500)
 
