@@ -206,12 +206,12 @@ SETUP_ROOT = Path(__file__).resolve().parent.parent
 
 @app.post('/api/agent-setup')
 def agent_setup(body:AgentSetupIn,user=Depends(admin)):
-    return build_plan(body, settings.app_origin, SETUP_ROOT)
+    return build_plan(body, settings.agent_download_origin or settings.app_origin, SETUP_ROOT)
 
 @app.post('/api/instances/{id}/agent-update')
 def agent_update(id:int,user=Depends(admin),db=Depends(get_db)):
     instance(db,id)
-    return build_update_command(settings.app_origin,SETUP_ROOT)
+    return build_update_command(settings.agent_download_origin or settings.app_origin,SETUP_ROOT)
 
 @app.get('/api/agent-installer')
 def agent_installer():

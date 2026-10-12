@@ -51,6 +51,9 @@ Die Oberfläche unter `APP_ORIGIN` öffnen und mit `ADMIN_USERNAME` / `ADMIN_PAS
 | `IMAGE_TAG` | Image-Version, standardmäßig `latest`; alternativ ein veröffentlichter `sha-…`-Tag. |
 | `APP_BIND` | Host-IP für die Portfreigabe, standardmäßig `0.0.0.0`; für einen lokalen Reverse Proxy `127.0.0.1`. |
 | `APP_PORT` | Host-Port der Weboberfläche, standardmäßig `8100`; Container-Port ist `8000`. |
+| `AGENT_DOWNLOAD_BIND` | Host-IP des optionalen Download-Ports, Standard `127.0.0.1`. Für einen getrennten Reverseproxy die LAN-IP verwenden. |
+| `AGENT_DOWNLOAD_PORT` | Host-Port für Installer und Agent-ZIP, Standard `8101`; Container-Port `8001`. Nur mit Compose-Profil `agent-downloads` aktiv. |
+| `AGENT_DOWNLOAD_ORIGIN` | Optional separate Basisadresse für Installations-/Update-Downloads, z. B. `https://agent-downloads.example.com`; leer verwendet `APP_ORIGIN`. |
 | `APP_ORIGIN` | Vollständiger Ursprung der Browser-Adresse einschließlich Schema und Port, ohne Pfad oder abschließenden Schrägstrich. |
 | `DB_HOST` | MariaDB-Hostname/IP, vom Container aus erreichbar. `localhost` bezeichnet den Container selbst. |
 | `DB_PORT` | MariaDB-Port, standardmäßig `3306`. |
@@ -69,6 +72,10 @@ Die Oberfläche unter `APP_ORIGIN` öffnen und mit `ADMIN_USERNAME` / `ADMIN_PAS
 | `AGENT_CA_FILE` | Optionaler Pfad zu einem CA-Bundle **im Container** für Agenten mit interner CA; sonst leer lassen. |
 
 Für eine interne CA `agent-ca-bundle.pem` mit System-CAs und der internen CA neben die Compose-Datei legen, den kommentierten `volumes`-Abschnitt aktivieren und `AGENT_CA_FILE=/certs/agent-ca-bundle.pem` setzen.
+
+## Optionaler Download-Port für Internet-Agenten
+
+Das Profil **agent-downloads** startet einen getrennten Container ohne Management-Zugangsdaten. Er stellt nur `/api/agent-installer` und `/api/agent-package` auf Host-Port 8101 bereit. Mit `AGENT_DOWNLOAD_ORIGIN` verwenden neu erzeugte Installations- und Update-Befehle die separate Download-Adresse. Die WebUI bleibt im LAN. Einrichtung, HTTPS-Veröffentlichung und gemeinsame Updates beider Container: [AGENT_DOWNLOADS.md](docs/AGENT_DOWNLOADS.md). [Anleitung auf GitHub](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/AGENT_DOWNLOADS.md).
 
 ## HAProxy-Server verbinden: Nativ oder Docker
 

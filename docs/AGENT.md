@@ -12,6 +12,10 @@ Die folgenden Schritte erklären die **manuelle Alternative** und die Vorbereitu
 
 Beispiel: Management auf `192.168.10.70:8100`, HAProxy-Host auf `192.168.10.71`. Die IPs, Pfade, Dienst- und Containernamen an die eigene Installation anpassen. **Alle Installationsbefehle in Schritt 1–4 auf dem HAProxy-Host ausführen.**
 
+## Download ohne Veröffentlichung der Management-WebUI
+
+Für HAProxy-Hosts außerhalb des LANs kann das optionale Compose-Profil **agent-downloads** ausschließlich Installer und Agent-ZIP auf einem separaten Port ausliefern. `AGENT_DOWNLOAD_ORIGIN` setzt die Adresse für neu erzeugte Installations-/Update-Befehle. Die Management-WebUI und ihre API bleiben im LAN; die eigentliche Agent-Verbindung benötigt unabhängig davon HTTPS oder VPN. [Download-Port einrichten](AGENT_DOWNLOADS.md).
+
 ## 1. Agent-Dateien und Python installieren
 
 Voraussetzungen: Linux mit systemd, Python 3.11+, bereits installiertes HAProxy; für Docker außerdem die Docker CLI auf dem Host. Die folgenden Paketbefehle gelten für Debian/Ubuntu. HAProxy 3.0 und 3.2 wurden getestet.

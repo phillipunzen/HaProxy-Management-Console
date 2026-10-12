@@ -12,6 +12,7 @@ files = {
     'README.md': root / 'docs' / 'DOCKER.md',
     'docs/CERTIFICATES.md': root / 'docs' / 'CERTIFICATES.md',
     'docs/PROXIES.md': root / 'docs' / 'PROXIES.md',
+    'docs/AGENT_DOWNLOADS.md': root / 'docs' / 'AGENT_DOWNLOADS.md',
     'docs/AGENT.md': root / 'docs' / 'AGENT.md',
     'docs/IMPORT.md': root / 'docs' / 'IMPORT.md',
     'docs/METRICS.md': root / 'docs' / 'METRICS.md',

@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libcrypt1 && rm
 COPY backend/ ./backend/
 COPY agent/ ./agent/
 COPY docs/AGENT.md ./docs/AGENT.md
+COPY docs/AGENT_DOWNLOADS.md ./docs/AGENT_DOWNLOADS.md
 COPY docs/IMPORT.md ./docs/IMPORT.md
 COPY docs/CERTIFICATES.md ./docs/CERTIFICATES.md
 COPY docs/PROXIES.md ./docs/PROXIES.md
@@ -28,6 +29,6 @@ COPY scripts/install-agent.sh ./scripts/install-agent.sh
 COPY downloads/haproxy-management-docker.zip ./downloads/haproxy-management-docker.zip
 COPY --from=ui /build/frontend/dist/ ./frontend/dist/
 USER control
-EXPOSE 8000
+EXPOSE 8000 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)" || exit 1
 CMD ["uvicorn","backend.main:app","--host","0.0.0.0","--port","8000","--workers","1","--no-proxy-headers"]

@@ -47,6 +47,10 @@ Falls das GHCR-Paket privat ist, vor dem Pull mit deinem GitHub-Benutzernamen un
 
 Alternativ lokal bauen: `docker compose up -d --build`. Logs: `docker compose -f compose.registry.yaml logs --tail 100 app`. Der Container startet nach Docker-/Host-Neustarts automatisch. Die Daten bleiben in der externen MariaDB.
 
+## Separater Agent-Download-Port
+
+Mit dem optionalen Compose-Profil **agent-downloads** lassen sich ausschließlich Agent-Installer und öffentliches Agent-ZIP auf Port 8101 bereitstellen. Ein eigener Container ohne Datenbankzugänge oder Management-Schlüssel verwendet `AGENT_DOWNLOAD_BIND`, `AGENT_DOWNLOAD_PORT` und `AGENT_DOWNLOAD_ORIGIN`; die WebUI bleibt im LAN. [Einrichtung und HTTPS](docs/AGENT_DOWNLOADS.md).
+
 ## Image-Veröffentlichung
 
 GitHub Actions führt die Unit-Tests aus, baut Frontend und Backend im mehrstufigen Docker-Build und veröffentlicht das Image in der GitHub Container Registry. Pushes auf `main` erzeugen `latest` und einen Commit-Tag (`sha-…`); Versions-Tags wie `v0.1.0` erzeugen zusätzlich `0.1.0` und `0.1`. Pull Requests prüfen den Build ohne Veröffentlichung. Der Workflow benötigt keine eigenen Registry-Secrets: er verwendet das temporäre `GITHUB_TOKEN` mit `packages:write`.

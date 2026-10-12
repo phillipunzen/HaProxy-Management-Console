@@ -17,6 +17,7 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to the browser URL in .env}
+      AGENT_DOWNLOAD_ORIGIN: ${AGENT_DOWNLOAD_ORIGIN:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       METRICS_INTERVAL: ${METRICS_INTERVAL:-30}
       METRICS_RAW_HOURS: ${METRICS_RAW_HOURS:-2}
@@ -38,3 +39,33 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+  # Optional public file server. Never pass .env or management credentials here.
+  agent-downloads:
+    profiles: [agent-downloads]
+    image: ghcr.io/phillipunzen/haproxy-management-console:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: [uvicorn, backend.agent_downloads:app, --host, 0.0.0.0, --port, "8001", --workers, "1", --no-proxy-headers, --no-access-log, --no-server-header, --limit-concurrency, "32", --backlog, "64", --timeout-keep-alive, "2", --h11-max-incomplete-event-size, "8192"]
+    ports:
+      - "${AGENT_DOWNLOAD_BIND:-127.0.0.1}:${AGENT_DOWNLOAD_PORT:-8101}:8001"
+    networks: [agent-downloads]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8001/api/agent-installer', method='HEAD'), timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  agent-downloads: {}
