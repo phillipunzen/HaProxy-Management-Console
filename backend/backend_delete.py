@@ -37,6 +37,8 @@ def remove_sections(config,names):
     from backend import tls_bindings
     from backend.access_control import strip_managed
     config=strip_managed(config)
+    from backend.managed_rules import strip as strip_rules
+    config=strip_rules(config)
     # Routing maps have already been expanded by generate_imported.
     dependencies(config,names)
     lines,sections=parse_sections(config);removed=set();fronts=set()
@@ -54,7 +56,8 @@ def remove_sections(config,names):
 
 
 def plan(doc,name):
-    original=remove_original_tool_hosts(doc.imported_config or '',doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
+    from backend.managed_rules import strip as strip_rules
+    original=remove_original_tool_hosts(strip_rules(doc.imported_config or ''),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
     raw=[s for s in parse_sections(original)[1] if s.kind in ('backend','listen') and s.name==name and name not in doc.removed_backends]
     if len(raw)>1:raise ValueError('Mehrere gleichnamige Pools: Namen zuerst im Texteditor bereinigen.')
     own=next((b for b in doc.backends if b.name==name),None)
@@ -70,6 +73,7 @@ def plan(doc,name):
         if f.backend==name:refs.append(f'{f.name}: default_backend {name}')
     value=doc.model_dump()
     value['hosts']=[h.model_dump() for h in doc.hosts if h not in hosts]
+    value['rules']=[r.model_dump() for r in doc.rules if (r.frontend or 'public_http') not in fronts]
     value['backends']=[b.model_dump() for b in doc.backends if b.name!=name]
     value['frontends']=[f.model_dump()|({'backend':None} if f.backend==name else {}) for f in doc.frontends if f.name not in fronts]
     value['imported_backends']=[b.model_dump() for b in doc.imported_backends if b.name!=name]

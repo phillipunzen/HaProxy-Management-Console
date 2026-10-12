@@ -257,6 +257,8 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
     from backend.basic_auth import restore_routes
     from backend.tls_bindings import restore_document
     from backend.access_control import restore_document as restore_access,strip_managed as check_access
+    from backend.managed_rules import read_and_strip
+    recovered_rules,_=read_and_strip(config)
     check_access(config)  # Refuse manually altered managed restrictions.
     recalled,recall_warnings=recalled_document(config,active_hash,maps,sources,map_hashes)
     proxies=inventory(config)
@@ -269,18 +271,19 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
                            'tcp':sum(p['mode']=='tcp' for p in proxies),'routes':len(recalled.imported_routes),'converted_maps':0,
                            'managed_hosts':len(recalled.hosts),'restored_document':True}}
     config=strip_document_metadata(config)
-    hosts,_=recover_tool_hosts(config,maps)
+    clean=read_and_strip(config)[1]
+    hosts,_=recover_tool_hosts(clean,maps)
     owned={'backend_'+h.id for h in hosts}
-    backends,warnings=extract_backends(config)
+    backends,warnings=extract_backends(clean)
     backends=[b for b in backends if b.name not in owned]
     warnings=recall_warnings+warnings
-    rules,routes,map_warnings=map_routes(config,maps or [])
+    rules,routes,map_warnings=map_routes(clean,maps or [])
     known={p['name'] for p in proxies if p['kind'] in ('backend','listen')}
     for route in routes:
         if route.backend not in known:warnings.append(f'{route.domain}: Backend {route.backend} fehlt in den eingelesenen Dateien.')
     for rule in rules:
         if rule['default'] and rule['default'] not in known:warnings.append(f'{rule["frontend"]}: Fallback {rule["default"]} fehlt in den eingelesenen Dateien.')
-    return {'document':restore_access(restore_document(restore_routes(Document(imported_config=config,imported_active_hash=active_hash,hosts=hosts,imported_managed_hosts=hosts,imported_backends=backends,
+    return {'document':restore_access(restore_document(restore_routes(Document(imported_config=config,imported_active_hash=active_hash,hosts=hosts,imported_managed_hosts=hosts,imported_backends=backends,rules=recovered_rules or [],
                                imported_routes=routes,imported_route_frontends=list(dict.fromkeys(r['frontend'] for r in rules)),imported_maps=maps or [],imported_sources=sources or [],
                                imported_map_hashes=map_hashes or [])))).model_dump(),
             'proxies':proxies,'warnings':warnings+map_warnings,
@@ -293,9 +296,9 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
 def generate_imported(doc):
     from backend.proxy_options import patch_options
     from backend.backend_delete import remove_sections
-    original=remove_original_tool_hosts(strip_document_metadata(doc.imported_config),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
+    from backend.managed_rules import strip as strip_rules
+    original=remove_original_tool_hosts(strip_rules(strip_document_metadata(doc.imported_config)),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
     baseline,_=extract_backends(original)
-    if doc.rules:raise ValueError('Übernommene Konfiguration: allgemeine Regeln im Texteditor ergänzen.')
     removed=set(doc.removed_backends)
     if {b.name for b in doc.imported_backends}!={b.name for b in baseline if b.name not in removed}:
         raise ValueError('Backend-Pools über die Löschfunktion entfernen; neue Pools unter Frontends & Backends anlegen.')

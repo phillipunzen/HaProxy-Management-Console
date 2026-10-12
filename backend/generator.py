@@ -26,9 +26,10 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.haproxy_config import remember_document
     from backend.managed_proxy import enhance
     from backend.access_control import inject as restrict
+    from backend.managed_rules import inject as apply_rules
     if doc.imported_config is not None:
         from backend.haproxy_config import generate_imported
-        return remember_document(restrict(inject(enhance(generate_imported(doc),doc,capabilities),doc,basic_auth),doc),doc)
+        return remember_document(restrict(inject(apply_rules(enhance(generate_imported(doc),doc,capabilities),doc),doc,basic_auth),doc),doc)
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):
@@ -43,19 +44,6 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         out += [f'    bind :{doc.https_port} ssl crt {cert_dir}/ alpn h2,http/1.1']
     if doc.acme_enabled:
         out += ['    acl acme_challenge path_beg /.well-known/acme-challenge/']
-    for rule in doc.rules:
-        if not rule.enabled:
-            continue
-        criterion = {'host':'hdr(host),field(1,:) -i','path_prefix':'path_beg','source_ip':'src','method':'method'}[rule.match]
-        out += [f'    acl rule_{rule.id} {criterion} {rule.value}']
-        condition = f'rule_{rule.id}' + (' !acme_challenge' if doc.acme_enabled else '')
-        if rule.action == 'deny':
-            out += [f'    http-request deny if {condition}']
-        elif rule.action == 'redirect':
-            out += [f'    http-request redirect location {rule.target} code {rule.code} if {condition}']
-        else:
-            name,value = rule.target.split(':',1)
-            out += [f'    http-request set-header {name} {value.strip()} if {condition}']
     hosts = sorted((h for h in doc.hosts if h.enabled and h.frontend=='public_http'), key=host_order)
     for host in hosts:
         out += host_acl(host)+[f'    acl path_{host.id} path_beg {host.path}']
@@ -74,4 +62,4 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         for i, server in enumerate(host.servers):
             tls = backend_tls(server)
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
-    return remember_document(restrict(inject(enhance('\n'.join(out) + '\n',doc,capabilities),doc,basic_auth),doc),doc)
+    return remember_document(restrict(inject(apply_rules(enhance('\n'.join(out) + '\n',doc,capabilities),doc),doc,basic_auth),doc),doc)

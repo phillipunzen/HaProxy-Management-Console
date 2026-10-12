@@ -16,6 +16,20 @@ Das Feld gibt es auch beim Bearbeiten einer **übernommenen Domain-Zuordnung**. 
 
 Das ausgewählte Produktionszertifikat muss alle Namen abdecken. Bei der Zertifikatsanforderung schlägt **Umfang → Alle Sites dieses Servers gemeinsam** auch zusätzliche Namen vor. DNS-Einträge für jeden Namen müssen auf den HAProxy zeigen. Bei bereits separat importierten Einträgen zuerst die zusätzliche Domain-Zuordnung entfernen und den Namen am gemeinsamen Eintrag hinterlegen; unterschiedliche Zugangsregeln oder Zertifikate bleiben beim Import als getrennte Einträge erhalten.
 
+## Domain-Weiterleitungen
+
+Unter **Regeln & Redirects → Domain-Weiterleitung** den Quell-Hostname, die Ziel-URL und das HTTP-/HTTPS-Frontend auswählen. Beispiel: `a.domain.de` → `https://b.domain.de`. Es wird kein Backend-Pool benötigt. Die Funktion steht auch für importierte Konfigurationen zur Verfügung.
+
+**Pfad und Query übernehmen** ist beim Anlegen eingeschaltet: `https://a.domain.de/artikel?id=5` wird zu `https://b.domain.de/artikel?id=5`. Dafür als Ziel nur Protokoll, Hostname und optional einen Port eintragen. Den Schalter ausschalten, um immer auf eine feste URL wie `https://b.domain.de/start` weiterzuleiten und den ursprünglichen Pfad samt Query zu ersetzen. Wildcard-Quellen wie `*.domain.de` sind möglich; liegt der Ziel-Hostname darunter, wird er von seiner eigenen Weiterleitung ausgenommen.
+
+**301** und **308** sind permanente, **302** und **307** temporäre Weiterleitungen. **307/308** erhalten die HTTP-Methode. Browser können permanente Weiterleitungen zwischenspeichern; zum Ausprobieren **302** verwenden. Siehe [HAProxy-Dokumentation zu Redirects](https://docs.haproxy.org/3.2/configuration.html#4.2-redirect).
+
+Die Quelle muss per DNS auf diesen HAProxy zeigen. Bei HTTPS benötigt bereits die Quell-Domain ein gültiges Zertifikat am gewählten Frontend; die Weiterleitung erfolgt erst nach dem TLS-Verbindungsaufbau. Bei getrennten HTTP- und HTTPS-Frontends pro Frontend eine Regel anlegen. Ein gemeinsamer Listener für beide Protokolle benötigt nur eine Regel. Unter **Zertifikate → Alle Sites dieses Servers gemeinsam** werden aktivierte Hostname-Weiterleitungen ebenfalls als Quellen berücksichtigt.
+
+Speichern ändert den Entwurf des ausgewählten Servers. Danach **Prüfen & anwenden**. Weiterleitungen können bearbeitet, deaktiviert, gelöscht und über **Nach oben** in ihrer Reihenfolge verändert werden. Bei mehreren passenden grafischen Regeln gilt die Reihenfolge je Frontend. Vorhandene davor liegende Authentifizierungs-, Sperr- und Header-Regeln bleiben erhalten; neue Weiterleitungen werden vor ursprünglichen Redirects, lokalen Antworten und der Backend-Auswahl eingefügt. Backend-Regeln einschließlich einer dort eingerichteten Anmeldung laufen bei einer direkten Weiterleitung nicht. Zentraler IP-Zugriff am Frontend bleibt wirksam. Der ACME-Pfad `/.well-known/acme-challenge/` wird von neuen Weiterleitungen ausgenommen.
+
+Beim erneuten Einlesen werden durch das Tool angelegte Regeln samt Einstellungen wiedererkannt. Änderungen außerhalb dieser Regelblöcke erhalten diese Zuordnung ebenfalls. Markierte Blöcke und Metadaten dürfen nicht getrennt verändert werden. Ursprüngliche, manuell erstellte Redirects bleiben im Konfigurationseditor verwaltbar; sie werden nicht automatisch in grafische Regeln umgewandelt. Unter **Regel** lassen sich zusätzlich Pfad-, IP- und Methodenbedingungen, Sperren oder Request-Header anlegen.
+
 ## Lastverteilung „First“
 
 **First** ist unter **Proxy Hosts → Bearbeiten → Lastverteilung**, beim Anlegen/Bearbeiten eigener HTTP-/TCP-Backend-Pools und bei übernommenen Backend-Pools auswählbar. Die Auswahl erzeugt `balance first` und bleibt beim erneuten Einlesen erhalten, einschließlich der Zuordnung selbst angelegter Proxy Hosts.

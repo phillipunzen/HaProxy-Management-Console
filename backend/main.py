@@ -132,6 +132,8 @@ def agent(i,path='',method='GET',body=None,timeout=10):
 def validate_document(db,doc):
     from backend.access_control import validate_document as validate_access
     validate_access(doc)
+    from backend.managed_rules import validate_document as validate_rules
+    validate_rules(doc)
     basic_auth.validate_document(db,doc)
 
 

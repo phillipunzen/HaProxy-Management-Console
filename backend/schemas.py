@@ -227,11 +227,13 @@ class Rule(BaseModel):
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,40}$')
     name: str = Field(min_length=1, max_length=120)
     enabled: bool = True
+    frontend: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     match: Literal['host', 'path_prefix', 'source_ip', 'method'] = 'path_prefix'
     value: str = Field(min_length=1, max_length=300)
     action: Literal['deny', 'redirect', 'set_header'] = 'deny'
     target: str = Field(default='', max_length=500)
     code: Literal[301, 302, 307, 308] = 301
+    preserve_path: bool = False
 
     @model_validator(mode='after')
     def valid_rule(self):
@@ -240,14 +242,25 @@ class Rule(BaseModel):
             ipaddress.ip_network(self.value, strict=False)
         if self.match == 'method' and self.value not in ('GET','POST','PUT','DELETE','PATCH','OPTIONS','HEAD'):
             raise ValueError('Ungültige HTTP-Methode.')
-        if self.match == 'host' and not DOMAIN.fullmatch(self.value.lower()):
-            raise ValueError('Ungültiger Hostname.')
+        if self.match == 'host':self.value=Host.domain_ok(self.value)
+        if any(c in self.value for c in ('"',"'")) or any(ord(c)<32 or ord(c)==127 for c in self.value):
+            raise ValueError('Ungültige Zeichen in der Regelbedingung.')
         if self.match == 'path_prefix' and not self.value.startswith('/'):
             raise ValueError('Pfad muss mit / beginnen.')
         if self.action == 'redirect':
             single(self.target)
-            if urlsplit(self.target).scheme not in ('http','https') or not urlsplit(self.target).hostname:
+            parsed=urlsplit(self.target)
+            if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username is not None or parsed.password is not None or not re.fullmatch(r'[a-zA-Z0-9._~:/?&=%+@,!()*\[\]-]+',self.target) or re.search(r'%(?![0-9a-fA-F]{2})',self.target):
                 raise ValueError('Redirect-Ziel muss eine HTTP(S)-URL sein.')
+            try:parsed.port
+            except ValueError:raise ValueError('Ungültiger Port in der Ziel-URL.')
+            if self.preserve_path:
+                if parsed.path not in ('','/') or parsed.query or parsed.fragment:
+                    raise ValueError('Bei Pfadübernahme nur Protokoll und Ziel-Hostname mit optionalem Port angeben.')
+                self.target=self.target.rstrip('/')
+            if self.match=='host' and parsed.hostname.lower()==self.value:
+                raise ValueError('Quell- und Ziel-Hostname müssen verschieden sein, sonst entsteht eine Weiterleitungsschleife.')
+        elif self.preserve_path:raise ValueError('Pfadübernahme ist nur bei Weiterleitungen möglich.')
         if self.action == 'set_header':
             if ':' not in self.target:
                 raise ValueError('Header im Format Name: Wert eingeben.')
