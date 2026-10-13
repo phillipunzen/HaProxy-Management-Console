@@ -418,7 +418,7 @@ td small { display: block; color: #64748b; margin-top: 5px; font-size: 11px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
-.wizard-steps { list-style: none; padding: 0; display: flex; gap: 14px; margin: 0 0 25px; }
+.wizard-steps { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 25px; }
 .wizard-steps li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #94a3b8; }
 .wizard-steps li > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #f1f5f9; flex-shrink: 0; }
 .wizard-steps li.active { color: #2563eb; font-weight: 600; }

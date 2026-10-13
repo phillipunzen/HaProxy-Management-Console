@@ -105,6 +105,8 @@ def test_authenticated_setup_and_update_use_separate_origin_and_same_pinned_file
     from backend import main
     c,factory,state=api;monkeypatch.setattr(main.settings,'agent_download_origin',origin)
     expected=origin or main.settings.app_origin
+    defaults=c.get('/api/agent-setup');assert defaults.status_code==200
+    assert defaults.json()=={'download_origin':expected}
     setup=c.post('/api/agent-setup',json=values());assert setup.status_code==200,setup.text
     update=c.post('/api/instances/1/agent-update',json={});assert update.status_code==200
     for command in [setup.json()['command'],update.json()['command']]:

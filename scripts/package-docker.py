@@ -20,6 +20,7 @@ files = {
     'docs/BASIC_AUTH.md': root / 'docs' / 'BASIC_AUTH.md',
     'docs/INFRASTRUCTURES.md': root / 'docs' / 'INFRASTRUCTURES.md',
     'docs/SERVERS.md': root / 'docs' / 'SERVERS.md',
+    'examples/haproxy-existing-compose.yml': root / 'examples' / 'haproxy-existing-compose.yml',
     'requirements.txt': root / 'requirements.txt',
     'backend/__init__.py': root / 'backend' / '__init__.py',
     'backend/managed_rules.py': root / 'backend' / 'managed_rules.py',
@@ -32,7 +33,7 @@ files = {
     'backend/basic_auth.py': root / 'backend' / 'basic_auth.py',
     'backend/tls_bindings.py': root / 'backend' / 'tls_bindings.py',
 }
-for name in ('__init__.py', 'main.py', 'certificates.py', 'challenge.py', 'tls_bindings.py', 'config_bundle.py', 'config.example.json',
+for name in ('__init__.py', 'main.py', 'certificates.py', 'challenge.py', 'tls_bindings.py', 'config_bundle.py', 'setup_checks.py', 'config.example.json',
              'haproxy-control-agent.service', 'haproxy-control-webroot.service'):
     files[f'agent/{name}'] = root / 'agent' / name
 with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:

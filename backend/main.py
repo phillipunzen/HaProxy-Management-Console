@@ -204,6 +204,10 @@ async def agent_update_error(request,error):
 
 SETUP_ROOT = Path(__file__).resolve().parent.parent
 
+@app.get('/api/agent-setup')
+def agent_setup_defaults(user=Depends(admin)):
+    return {'download_origin':settings.agent_download_origin or settings.app_origin}
+
 @app.post('/api/agent-setup')
 def agent_setup(body:AgentSetupIn,user=Depends(admin)):
     return build_plan(body, settings.agent_download_origin or settings.app_origin, SETUP_ROOT)

@@ -4,9 +4,95 @@ Die Management-WebUI spricht mit einem **Agenten auf dem HAProxy-Host**. Dieser 
 
 ## Installation über den WebUI-Assistenten
 
-Unter **Server → Server verbinden** Nativ oder Docker wählen, Host-IP und Pfade angeben. Der Assistent erstellt einen individuellen Einzeiler mit Token, Agent-Adresse und SHA-256-Prüfsummen. Auf dem HAProxy-Host per SSH ausführen und anschließend im geöffneten Dialog **Verbindung prüfen & speichern** wählen. Der automatisch installierte Agent liegt unter `/opt/haproxy-control-agent`; seine Profile liegen wie bei der manuellen Installation unter `/etc/haproxy-control/agent.json`. Der Installer ergänzt bei Bedarf den Runtime-Socket, prüft vor dem HAProxy-Reload und stellt bei einem Fehler die alte Konfiguration wieder her. Bestehende Agent-Profile werden erhalten; ein vorhandenes Profil wird nicht durch einen neuen Token ersetzt.
+Unter **Server → Server verbinden** Nativ oder Docker sowie **LAN** oder **Internet / andere Infrastruktur** wählen. Für einen Internet-Host bietet der Assistent **VPN** oder **direktes HTTPS**. Der Management-Server verbindet sich zum Agenten; die Management-WebUI muss dafür nicht veröffentlicht werden.
 
-Voraussetzungen: Debian/Ubuntu mit systemd, curl, sudo, eine laufende HAProxy-Instanz und Netzwerkzugriff auf die Management-Adresse sowie Paketquellen. Bei Docker benötigt der Container die im Assistenten gezeigten Verzeichnis-Mounts; der Installer verändert die Containerdefinition nicht. Den Agent-Port nur für den Management-Host freigeben. Cloudflare- oder Hetzner-Token anschließend im Zertifikatsdialog hinterlegen; LEGO wird vom Installer mit eingerichtet. Der Befehl enthält den Agent-Token und gehört nicht in öffentliche Tickets oder Protokolle.
+Die vier Schritte führen durch Installation, Host-Pfade, Vorbereitung/Download und den persönlichen Einzeiler mit Agent-Token und SHA-256-Prüfsummen. Bei Docker mit einer vorhandenen Compose-Datei die Dateistruktur **Compose-Ordner mit haproxy.cfg, certs, vhosts und dnsmapping.cfg** auswählen und z. B. `/srv/haproxy` angeben. Dann werden die Pfade, Mounts und Vorbereitung passend angezeigt. Anschließend den Installationsbefehl auf dem HAProxy-Host per SSH ausführen und im geöffneten Dialog **Verbindung prüfen & speichern** wählen.
+
+Der Agent liegt unter `/opt/haproxy-control-agent`; Profile liegen unter `/etc/haproxy-control/agent.json`. Voraussetzungen: Debian/Ubuntu mit systemd (auch Debian 13), curl, sudo, eine laufende HAProxy-Instanz und Zugriff auf Download-Adresse sowie Paketquellen. Bei Docker müssen die angezeigten Verzeichnis-Mounts zuvor vorbereitet sein; der Installer verändert die Compose-Datei nicht. Bestehende Agent-Profile und Tokens bleiben erhalten; weitere Profile müssen denselben Agent-Endpunkt verwenden. Der Befehl enthält den Agent-Token und gehört nicht in öffentliche Tickets oder Protokolle.
+
+Der Installer prüft auch die tatsächlich geladenen zusätzlichen `-f`-Dateien. Diese müssen ebenfalls über Verzeichnis-Mounts erreichbar sein, damit eine spätere Migration atomar schreiben und wiederherstellen kann. Bei HTTPS prüft er zunächst Zertifikat, passenden Schlüssel, Laufzeit und Agent-Hostname. Danach ergänzt er bei Bedarf den Runtime-Socket, prüft die komplette Konfiguration und lädt HAProxy neu. Bei einem Fehler wird die alte Konfiguration wiederhergestellt. Cloudflare- oder Hetzner-Token für HAProxy-Zertifikate anschließend im Zertifikatsdialog hinterlegen; LEGO wird mit installiert.
+
+## Bestehende Compose unter /srv/haproxy vorbereiten
+
+Bei folgender Struktur bleibt das externe Docker-Netzwerk `dockernet` unverändert:
+
+```text
+/srv/haproxy/
+  docker-compose.yml          # tatsächlichen Dateinamen verwenden
+  haproxy.cfg
+  dnsmapping.cfg
+  certs/
+  vhosts/
+```
+
+Vor Änderungen Compose, Konfiguration, Zertifikate und Vhosts sichern. Im Compose-Verzeichnis ein eigenes Config-Verzeichnis anlegen und die beiden bisherigen einzelnen Dateien nach `config/` kopieren; Originale behalten. Bestehende abweichende Zielkopien zuerst vergleichen. UID/GID des laufenden Containers verwenden:
+
+```bash
+cd /srv/haproxy
+sudo install -d -m 755 config config/certs config/vhosts
+for file in haproxy.cfg dnsmapping.cfg; do
+  if [ -e "config/$file" ]; then sudo cmp -- "$file" "config/$file" || exit 1;
+  else sudo cp -p -- "$file" "config/$file"; fi
+done
+haproxy_uid=$(sudo docker exec haproxy id -u)
+haproxy_gid=$(sudo docker exec haproxy id -g)
+sudo install -d -m 750 -o "$haproxy_uid" -g "$haproxy_gid" run
+```
+
+Die leeren Verzeichnisse `config/certs` und `config/vhosts` dienen als Mount-Ziele für die bestehenden Verzeichnisse; ohne sie kann Docker keine verschachtelten Mounts im schreibgeschützten Config-Verzeichnis anlegen.
+
+Den gesamten bisherigen `volumes`-Block ersetzen (keine zusätzlichen einzelnen Datei-Mounts darüberlegen):
+
+```yaml
+    volumes:
+      - ./config:/usr/local/etc/haproxy:ro
+      - ./certs:/usr/local/etc/haproxy/certs:ro
+      - ./vhosts:/usr/local/etc/haproxy/vhosts:ro
+      - ./run:/run/haproxy:rw
+```
+
+Die vollständige passende Vorlage liegt im ZIP unter `examples/haproxy-existing-compose.yml`. Image `haproxy:3.2-alpine`, Containername, Ports 80/443, Netzwerk und beide `-f`-Argumente bleiben erhalten. `dnsmapping.cfg` liegt dadurch weiter unter `/usr/local/etc/haproxy/dnsmapping.cfg`; Dateien werden weiterhin nur geladen, wenn sie im HAProxy-Startbefehl oder als referenzierte Datei verwendet werden. Ein Mount allein lädt keine Config-Datei.
+
+Die Config- und Zertifikats-Mounts bleiben im Container schreibgeschützt. Der Agent läuft auf dem Host und schreibt dort; lediglich der gemeinsame Runtime-Socket benötigt einen beschreibbaren Container-Mount. Das Konfigurationsverzeichnis enthält weder die Compose-Datei noch deren `.env`.
+
+Compose prüfen, die bestehende HAProxy-Konfiguration prüfen und Container neu erstellen (kurze Unterbrechung möglich; Dateinamen anpassen):
+
+```bash
+sudo docker compose -f docker-compose.yml config --quiet
+sudo docker exec haproxy haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg -f /usr/local/etc/haproxy/vhosts
+sudo docker compose -f docker-compose.yml up -d --force-recreate haproxy
+```
+
+Danach im Assistenten die vorbereitete Struktur auswählen. Die erzeugten Agent-Pfade sind `/srv/haproxy/config/haproxy.cfg`, `/srv/haproxy/run/admin.sock`, `/srv/haproxy/certs`; die Zertifikatspfade im Container bleiben `/usr/local/etc/haproxy/certs`. Die Vhosts werden anhand der laufenden Container-Argumente erkannt. Beim ersten Einlesen **Aktive Dateien vom HAProxy-Agenten** verwenden: eine spätere bestätigte Migration konsolidiert die geladenen Dateien, sichert alle Originale und entfernt doppelte aktive Definitionen aus den alten Dateien. Ohne Prüfen & anwenden wird der laufende Dienst nicht durch einen grafischen Entwurf ersetzt.
+
+## Internet-Host: Verbindung und Download getrennt vorbereiten
+
+**VPN:** Zuerst WireGuard, Tailscale oder ein vorhandenes VPN zwischen den Standorten einrichten. Im Assistenten die tatsächlich erreichbare VPN-IP des HAProxy-Hosts verwenden; auch der Management-Container muss diese IP erreichen können. Private IPv4-, ULA-IPv6- und Tailscale-Adressen im Bereich `100.64.0.0/10` werden unterstützt. Der Agent bindet nur an diese IP; HTTP läuft innerhalb des verschlüsselten Tunnels. Agent-Port nur auf der VPN-Verbindung für das Management freigeben. Ohne Tunnel/Routen richtet der Einzeiler kein VPN ein.
+
+**Direktes HTTPS:** Eine eigene Agent-Domain, z. B. `agent.example.de`, auf die öffentliche IP des Docker-Hosts zeigen lassen. Bei Cloudflare **DNS only** verwenden. Im Assistenten die Domain, eine lokal vorhandene Bind-IP, den eigenen Agent-Port und PEM-Pfade zu Zertifikatskette/Schlüssel angeben. Uvicorn bietet den Agenten selbst über TLS an; die Verbindung bleibt unabhängig von den verwalteten HAProxy-Frontends. Port 80/443 der HAProxy-Compose unverändert lassen. Der Management-Client prüft die Zertifikatskette und den Hostnamen; keine Abschaltung der Zertifikatsprüfung. Für interne CAs das CA-Bundle über `AGENT_CA_FILE` im Management bereitstellen.
+
+Ein gültiges Zertifikat muss vor dem Installationsbefehl auf dem Host vorhanden sein. Ein bestehendes Wildcard-Zertifikat kann verwendet werden, wenn es die Agent-Domain abdeckt. Bei einer kombinierten HAProxy-PEM-Datei kann dieselbe Datei als Zertifikat und Schlüssel angegeben werden. Diese Dateien gehören auf dem Host vorzugsweise unter `/etc/haproxy-control/tls` oder in den bestehenden ACME-Store, nicht unter `/root` oder `/home` (systemd `ProtectHome`). Ein separat ausgestelltes Cloudflare-DNS-Zertifikat ist z. B. möglich:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y certbot python3-certbot-dns-cloudflare
+sudo install -d -m 700 /etc/haproxy-control/tls
+sudo install -m 600 /dev/null /etc/haproxy-control/tls/cloudflare.ini
+sudo nano /etc/haproxy-control/tls/cloudflare.ini
+# Inhalt: dns_cloudflare_api_token = DEIN_TOKEN
+# DNS Edit und Zone Read nur für die benötigte Zone erlauben.
+sudo certbot certonly --dns-cloudflare   --dns-cloudflare-credentials /etc/haproxy-control/tls/cloudflare.ini   --dns-cloudflare-propagation-seconds 60   --agree-tos --email DEINE_EMAIL --cert-name haproxy-control-agent   -d agent.example.de   --deploy-hook 'if systemctl --quiet is-active haproxy-control-agent; then systemctl restart haproxy-control-agent; fi'
+```
+
+Domain und E-Mail ersetzen. Im HTTPS-Assistenten danach `/etc/letsencrypt/live/haproxy-control-agent/fullchain.pem` und `/etc/letsencrypt/live/haproxy-control-agent/privkey.pem` verwenden. Den Certbot-Erneuerungstimer auf dem Host prüfen (`systemctl status certbot.timer`) und aktivieren, sofern er noch nicht läuft. Nach Erneuerung müssen Agent-TLS-Zertifikate vom Agent-Dienst neu eingelesen werden: der Deploy-Hook startet ihn dafür neu. Bei bestehenden LEGO-/Cron-Aufträgen den Agent-Neustart in den erfolgreichen Deploy-Schritt aufnehmen. Die Zertifikatsverwaltung für Reverseproxy-Webseiten erneuert dieses separate Transportzertifikat nicht automatisch.
+
+In **Host- und Provider-Firewall** den Agent-Port ausschließlich für die öffentliche Ausgangs-IP des Management-Standorts freigeben. Bei NAT diesen Port zusätzlich auf die lokale Bind-IP weiterleiten. IPv4 und IPv6 separat berücksichtigen. Der Agent braucht keine eingehende Verbindung zur LAN-Management-WebUI. Beispiel für eine schon aktive UFW-Firewall (Platzhalter ersetzen):
+
+```bash
+sudo ufw allow from MANAGEMENT_AUSGANGS_IP to AGENT_BIND_IP port 9101 proto tcp
+```
+
+Der **Download** ist die Gegenrichtung: der Internet-Host lädt einmalig Installer/ZIP und bei Updates erneut. Eine LAN-Adresse wie `http://192.168.10.70:8101` funktioniert ohne VPN nicht. Im Assistenten daher eine vom Host erreichbare Download-Basis-URL angeben, z. B. `https://agent-download.example.de`; alternativ die vorkonfigurierte Adresse über das VPN nutzen. Öffentlich nur den [Download-Dienst](AGENT_DOWNLOADS.md) hinter HTTPS veröffentlichen, nicht die Management-API. Download-Port allein stellt keine Verbindung zum Agenten her. Die individuelle Download-Adresse im Assistenten gilt für den erzeugten Installationsbefehl; für spätere Update-Befehle die erreichbare Standard-Adresse über `AGENT_DOWNLOAD_ORIGIN` einstellen.
 
 Die folgenden Schritte erklären die **manuelle Alternative** und die Vorbereitung der HAProxy-Instanz. Bei einem bereits vorhandenen Agenten im Assistenten **Agent bereits installiert** wählen.
 

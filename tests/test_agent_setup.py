@@ -61,3 +61,41 @@ def test_update_command_preserves_existing_profile_credentials():
     assert 'HAPROXY_AGENT_UPDATE_ONLY=1' in command
     assert 'HAPROXY_AGENT_SETUP_B64' not in command
     assert 'sha256sum -c' in command
+
+
+def test_https_public_host_has_verified_transport_and_independent_download():
+    data=values('docker')|dict(host='203.0.113.10',connection='https',allow_http=False,
+        agent_hostname='agent.example.de',download_origin='https://download.example.de')
+    plan=build_plan(AgentSetupIn(**data),'http://192.168.10.70:8101',ROOT)
+    args=shlex.split(plan['command'])
+    encoded=next(arg.split('=',1)[1] for arg in args if arg.startswith('HAPROXY_AGENT_SETUP_B64='))
+    setup=json.loads(base64.b64decode(encoded))
+    assert setup['tls']['hostname']=='agent.example.de'
+    assert setup['bind']=='203.0.113.10'
+    assert plan['instance']['agent_url']=='https://agent.example.de:9101'
+    assert plan['instance']['allow_http'] is False
+    assert 'https://download.example.de/api/agent-installer' in plan['command']
+    assert '192.168.10.70' not in plan['command']
+    assert ' -k ' not in plan['command']
+
+
+@pytest.mark.parametrize('host',['10.100.0.2','100.90.1.2','fdab::2'])
+def test_vpn_ips_supported_without_public_http(host):
+    body=AgentSetupIn(**(values()|dict(host=host,connection='vpn')))
+    assert 'tls' not in json.loads(base64.b64decode(next(arg.split('=',1)[1] for arg in shlex.split(build_plan(body,'https://download.example.de',ROOT)['command']) if arg.startswith('HAPROXY_AGENT_SETUP_B64='))))
+
+
+@pytest.mark.parametrize('changes',[
+    dict(connection='vpn',host='1.1.1.1'),
+    dict(connection='https',host='1.1.1.1',allow_http=True,agent_hostname='agent.example.de'),
+    dict(connection='https',allow_http=False,agent_hostname='bad;command'),
+    dict(connection='https',allow_http=False,agent_hostname=''),
+    dict(download_origin='http://1.1.1.1:8101'),
+    dict(download_origin='http://download.example.de'),
+    dict(download_origin='https://user:pass@download.example.de'),
+    dict(download_origin='https://download.example.de/path'),
+    dict(download_origin='https://download.example.de:99999'),
+    dict(download_origin='https://download.example.de?token=secret'),
+])
+def test_transport_and_download_fail_closed(changes):
+    with pytest.raises(ValidationError):AgentSetupIn(**(values()|changes))

@@ -119,3 +119,25 @@ def test_archive_installer_includes_proxy_option_schema_dependency(tmp_path):
             target=tmp_path/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(archive.read('haproxy-management/'+name))
     result=subprocess.run([sys.executable,'-c',"from backend.schemas import Host; h=Host(id='app',domain='app.example.com',servers=[{'address':'127.0.0.1'}],proxy_options=['http-request set-path /reset-password%[path]']); assert len(h.proxy_options)==1"],cwd=tmp_path,env=dict(os.environ,PYTHONPATH=str(tmp_path)),capture_output=True,text=True)
     assert result.returncode==0,result.stderr
+
+
+def test_existing_agent_endpoint_cannot_be_changed_by_adding_profile(setup):
+    execute,p,config,original,profile_file,calls=setup
+    profile_file.parent.mkdir();profile_file.write_text(json.dumps({'listener':{'bind':'192.168.10.99','port':9101,'tls':None},'profiles':{'other':{'config_path':'/other.cfg','runtime_socket':'/other.sock'}}}))
+    with pytest.raises(SystemExit,match='andere Adresse'):execute()
+    assert config.read_text()==original and not calls
+
+
+def test_https_unit_and_second_profile_write_paths_preserved(setup,monkeypatch,tmp_path):
+    execute,p,config,original,profile_file,calls=setup
+    from tests.test_agent_setup_checks import certificate
+    tls=certificate(tmp_path)
+    profile_file.parent.mkdir();profile_file.write_text(json.dumps({'profiles':{'other':{'config_path':'/etc/other/proxy.cfg','runtime_socket':'/etc/other/run/admin.sock','cert_dir':'/etc/other/certs'}}}))
+    encoded=base64.b64encode(json.dumps({'profile_name':'test','profile':p,'bind':'192.168.10.71','port':9101,'tls':tls}).encode()).decode()
+    monkeypatch.setenv('HAPROXY_AGENT_SETUP_B64',encoded)
+    code=SCRIPT.replace('/etc/haproxy-control/agent.json',str(profile_file)).replace('/var/lib/haproxy-control',str(tmp_path/'state')).replace('/etc/systemd/system',str(tmp_path/'systemd'))
+    exec(compile(code,'installer','exec'),{})
+    unit=(tmp_path/'systemd/haproxy-control-agent.service').read_text()
+    assert '--ssl-certfile '+tls['cert_file'] in unit and '--ssl-keyfile '+tls['key_file'] in unit
+    assert '-/etc/other/certs' in unit and '-/etc/other ' in unit
+    assert json.loads(profile_file.read_text())['listener']['tls']==tls

@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 from zipfile import ZipFile
 allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/proxy_options.py', 'backend/backend_delete.py', 'backend/access_control.py', 'backend/managed_rules.py', 'backend/haproxy_config.py', 'backend/tls_bindings.py',
-           'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/challenge.py', 'agent/tls_bindings.py', 'agent/haproxy-control-webroot.service', 'agent/config_bundle.py', 'agent/config.example.json']
+           'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/challenge.py', 'agent/tls_bindings.py', 'agent/haproxy-control-webroot.service', 'agent/config_bundle.py', 'agent/setup_checks.py', 'agent/config.example.json']
 with ZipFile(sys.argv[1]) as archive:
     for name in allowed:
         target = Path(sys.argv[2]) / name
@@ -82,9 +82,11 @@ cd "$haproxy_install_dir"
 import base64, json, os, re, shutil, socket, subprocess, tempfile, time
 from pathlib import Path
 from agent import main as agent
+from agent.setup_checks import tls_options, docker_directories
 
 setup = json.loads(base64.b64decode(os.environ['HAPROXY_AGENT_SETUP_B64'], validate=True))
 name, p = setup['profile_name'], setup['profile']
+ssl_options = tls_options(setup)
 config_file = Path('/etc/haproxy-control/agent.json')
 if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,80}', name):
     raise SystemExit('Ungültiger Profilname.')
@@ -102,31 +104,37 @@ for current in existing['profiles'].values():
         if certificate_dir == other_dir or certificate_dir.is_relative_to(other_dir) or other_dir.is_relative_to(certificate_dir):
             raise SystemExit('Ein eigenes Zertifikatsverzeichnis pro Agent-Profil verwenden; gemeinsam genutzte oder ineinander liegende Verzeichnisse sind nicht isoliert.')
 
+# Adding a second profile must not change the endpoint of existing profiles.
+unit_path = Path('/etc/systemd/system/haproxy-control-agent.service')
+endpoint = {'bind':setup['bind'],'port':setup['port'],'tls':setup.get('tls')}
+if existing['profiles']:
+    previous = existing.get('listener')
+    if previous is not None and previous != endpoint:
+        raise SystemExit('Vorhandener Agent nutzt eine andere Adresse, Port oder TLS-Einstellung. Gleichen Endpunkt verwenden oder vorhandenen Agenten manuell verbinden.')
+    if previous is None and unit_path.exists():
+        unit_text = unit_path.read_text()
+        if f"--host {setup['bind']} --port {setup['port']} " not in unit_text or bool('--ssl-certfile' in unit_text) != bool(ssl_options) or ssl_options:
+            raise SystemExit('Bestehenden Agent-Endpunkt beibehalten; Adresse oder TLS für vorhandene Profile manuell umstellen.')
+existing['listener'] = endpoint
+
 if p['kind'] == 'docker':
-    mounts = json.loads(agent.run(['docker', 'inspect', '--format', '{{json .Mounts}}', p['container']]))
-    def mounted(host_path, container_path, writable=False):
-        for mount in mounts:
-            source, dest = Path(mount['Source']), Path(mount['Destination'])
-            if not source.is_dir():
-                continue
-            try:
-                relative = Path(host_path).relative_to(source)
-            except ValueError:
-                continue
-            if dest / relative == Path(container_path) and (not writable or mount.get('RW')):
-                return True
-        return False
-    container_config = str(Path(p['container_config_dir']) / Path(p['config_path']).name)
-    required = [(p['config_path'], container_config, False),
-                (p['runtime_socket'], p['runtime_socket_config'], True),
-                (p['cert_dir'], p['cert_dir_config'], False)]
-    for source, destination, writable in required:
-        if not mounted(source, destination, writable):
-            raise SystemExit(f'Docker-Verzeichnis-Mount fehlt: {source} -> {destination}. Compose-Datei wie im Assistenten angezeigt anpassen und Container neu erstellen; danach Befehl erneut ausführen.')
+    writable_config_dirs = docker_directories(p, agent.run, agent.sha)
     p['cert_uid'] = int(agent.run(['docker', 'exec', p['container'], 'id', '-u']))
     p['cert_gid'] = int(agent.run(['docker', 'exec', p['container'], 'id', '-g']))
 else:
+    writable_config_dirs = {str(Path(p['config_path']).parent)}
     agent.run(['systemctl', 'is-active', p['service']])
+
+writable_dirs = writable_config_dirs | {p['cert_dir'], str(Path(p['runtime_socket']).parent), '/etc/letsencrypt', '/etc/lego'}
+for other in existing['profiles'].values():
+    writable_dirs.update({str(Path(other['config_path']).parent),str(Path(other['runtime_socket']).parent)})
+    for source in other.get('config_sources',[]) + other.get('_detected_sources',[]):
+        writable_dirs.add(str(Path(source) if Path(source).is_dir() else Path(source).parent))
+    if other.get('cert_dir'): writable_dirs.add(other['cert_dir'])
+    if other.get('lego',{}).get('path'): writable_dirs.add(other['lego']['path'])
+if any(re.search(r'[\s%]', path) or '..' in Path(path).parts for path in writable_dirs):
+    raise SystemExit('Ungültiger Schreibpfad für Agent-Unit.')
+read_write_paths = ' '.join('-'+path for path in sorted(writable_dirs))
 
 haproxy_config = Path(p['config_path'])
 if not haproxy_config.is_file():
@@ -189,14 +197,14 @@ Type=simple
 WorkingDirectory=/opt/haproxy-control-agent
 Environment=AGENT_CONFIG=/etc/haproxy-control/agent.json
 Environment=AGENT_STATE_DIR=/var/lib/haproxy-control
-ExecStart=/opt/haproxy-control-agent/.venv/bin/uvicorn agent.main:app --host {setup['bind']} --port {setup['port']} --workers 1 --no-proxy-headers --no-access-log
+ExecStart=/opt/haproxy-control-agent/.venv/bin/uvicorn agent.main:app --host {setup['bind']} --port {setup['port']} --workers 1 --no-proxy-headers --no-access-log{ssl_options}
 Restart=on-failure
 RestartSec=5
 UMask=0077
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=-/etc/haproxy -/etc/letsencrypt -/etc/lego
+ReadWritePaths={read_write_paths}
 [Install]
 WantedBy=multi-user.target
 '''
