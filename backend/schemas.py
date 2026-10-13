@@ -172,7 +172,33 @@ class AccessPolicy(BaseModel):
             if value not in result:result.append(value)
         return result
 
+class AccessProfile(BaseModel):
+    id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,80}$')
+    name: str = Field(min_length=1,max_length=120)
+    description: str = Field(default='',max_length=500)
+    networks: list[str] = Field(min_length=1,max_length=100)
+
+    @field_validator('name','description')
+    @classmethod
+    def text_ok(cls,value):
+        value=value.strip()
+        if any(ord(c)<32 for c in value):raise ValueError('Profiltext darf keine Steuerzeichen enthalten.')
+        return value
+
+    @field_validator('name')
+    @classmethod
+    def name_ok(cls,value):
+        if not value:raise ValueError('Profilnamen angeben.')
+        return value
+
+    @field_validator('networks')
+    @classmethod
+    def networks_ok(cls,value):return AccessPolicy.networks_ok(value)
+
 class Host(BaseModel):
+    access_profile: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
+    access_paths: list[str] = Field(default_factory=list,max_length=20)
+    _access_paths_ok=field_validator('access_paths')(AccessPolicy.paths_ok.__func__)
     access_policy: AccessPolicy | None = None
     proxy_options: list[str] = Field(default_factory=list,max_length=100)
 
@@ -292,6 +318,9 @@ class ImportedBackend(BaseModel):
     servers: list[ImportedServer] = Field(max_length=500)
 
 class ImportedRoute(BaseModel):
+    access_profile: str | None = Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
+    access_paths: list[str] = Field(default_factory=list,max_length=20)
+    _access_paths_ok=field_validator('access_paths')(AccessPolicy.paths_ok.__func__)
     access_policy: AccessPolicy | None = None
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,80}$')
     frontend: str = Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
@@ -371,6 +400,7 @@ class ManagedFrontend(BaseModel):
     def bind_ok(cls,value):return str(ipaddress.ip_address(value))
 
 class Document(BaseModel):
+    access_profiles: list[AccessProfile] = Field(default_factory=list,max_length=100)
     http_port: int = Field(default=80, ge=1, le=65535)
     https_port: int = Field(default=443, ge=1, le=65535)
     tls_enabled: bool = False
@@ -411,6 +441,16 @@ class Document(BaseModel):
 
     @model_validator(mode='after')
     def unique_ids(self):
+        profiles={p.id:p for p in self.access_profiles}
+        if len(profiles)!=len(self.access_profiles) or len({p.name.casefold() for p in self.access_profiles})!=len(profiles):
+            raise ValueError('IP-Filter-Profilnamen und IDs müssen pro Server eindeutig sein.')
+        for item in self.hosts+self.imported_routes:
+            if item.access_profile and item.access_profile not in profiles:
+                raise ValueError('Zugewiesenes IP-Filter-Profil fehlt. Zuordnung ändern, bevor das Profil gelöscht wird.')
+            if item.access_profile and item.access_policy:
+                raise ValueError('IP-Filter-Profil oder eigene IP-Liste wählen, nicht beides gleichzeitig.')
+            if item.access_paths and not item.access_profile:
+                raise ValueError('Geschützte Profil-Pfade benötigen ein zugewiesenes IP-Filter-Profil.')
         if any(b.proxy_options is None for b in self.imported_backends) or any(s.tls_verify is None for b in self.imported_backends for s in b.servers):
             from backend.haproxy_config import extract_backends
             original,_=extract_backends(self.imported_config or '')

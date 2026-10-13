@@ -255,7 +255,7 @@ def import_preview_for(i,body):
     except ValueError as error:raise HTTPException(422,str(error))
     current=Document.model_validate(i.document).model_dump()
     incoming=preview['document']
-    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates','removed_backends')
+    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates','removed_backends','access_profiles')
     if any(current.get(key) for key in editable) and any(current.get(key)!=incoming.get(key) for key in editable):
         preview['warnings'].append('Die Übernahme ersetzt den aktuellen Arbeitsentwurf durch den eingelesenen Stand. Noch nicht angewendete Änderungen vorher anwenden oder sichern; Einlesen & Vorschau allein ändert den Entwurf nicht.')
     preview['warnings']+=bundle['warnings'];preview['active_hash']=bundle['hash']

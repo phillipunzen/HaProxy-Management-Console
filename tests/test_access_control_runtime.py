@@ -11,7 +11,7 @@ import pytest
 from backend import access_control as access,basic_auth
 from backend.generator import generate
 from backend.haproxy_config import import_config
-from backend.schemas import Document,AccessPolicy
+from backend.schemas import Document,AccessPolicy,AccessProfile
 from tests.test_proxy_options_runtime import HTTP,port,BINARY
 
 class KeepaliveHTTP(HTTP):
@@ -19,9 +19,10 @@ class KeepaliveHTTP(HTTP):
 
 pytestmark=pytest.mark.skipif(os.environ.get('HAPROXY_BASIC_AUTH_LAB')!='1',reason='Requires isolated HAProxy lab')
 
+@pytest.mark.parametrize('profiled',[False,True])
 @pytest.mark.parametrize('kind',['native','docker'])
 @pytest.mark.parametrize('scenario',['host','imported','map'])
-def test_source_network_path_alias_shared_pool_basic_auth_and_clear(tmp_path,kind,scenario):
+def test_source_network_path_alias_shared_pool_basic_auth_and_clear(tmp_path,kind,scenario,profiled):
     for parent in [tmp_path,*tmp_path.parents]:
         if str(parent).startswith('/tmp/pytest-of-root'):parent.chmod(0o755)
     tmp_path.chmod(0o755)
@@ -61,6 +62,12 @@ backend fallback
         for route in doc.imported_routes:
             if route.domain in ('app.example.com','www.example.com'):
                 route.access_policy=AccessPolicy.model_validate(policy);route.basic_auth_group=1
+    if profiled:
+        doc.access_profiles=[AccessProfile(id='lan',name='LAN',networks=policy['networks'])]
+        for entry in doc.hosts+doc.imported_routes:
+            if entry.access_policy:
+                entry.access_paths=entry.access_policy.paths;entry.access_profile='lan';entry.access_policy=None
+        doc=Document.model_validate(doc.model_dump())
     clients={source:httpx.Client(transport=httpx.HTTPTransport(local_address=source),trust_env=False,timeout=2) for source in ('127.0.0.1','127.0.0.2','::1')}
     process=None;container=None
     def request(source='127.0.0.1',domain='app.example.com',path='/admin/login',auth=True,headers=None):
@@ -114,12 +121,21 @@ backend fallback
         assert request('127.0.0.2').status_code==403
         entries=again.hosts if scenario=='host' else again.imported_routes
         for entry in entries:
-            if entry.domain in ('app.example.com','www.example.com'):entry.access_policy.paths=[]
+            if entry.domain in ('app.example.com','www.example.com'):
+                if profiled:entry.access_paths=[]
+                else:entry.access_policy.paths=[]
         if scenario=='host':again.acme_enabled=True;again.acme_address='127.0.0.1';again.acme_port=server.server_port
         launch(again);assert request('127.0.0.2',path='/public').status_code==403
         if scenario=='host':assert request('127.0.0.2',path='/.well-known/acme-challenge/test',auth=False).status_code==200
+        if profiled:
+            again.access_profiles[0].networks.append('127.0.0.2')
+            launch(again);assert request('127.0.0.2').status_code==200
+            assert request('127.0.0.2',domain='www.example.com').status_code==200
+            again.access_profiles[0].networks.remove('127.0.0.2')
+            launch(again);assert request('127.0.0.2').status_code==403
         for entry in entries:
-            if entry.domain in ('app.example.com','www.example.com'):entry.access_policy=None
+            if entry.domain in ('app.example.com','www.example.com'):
+                entry.access_policy=None;entry.access_profile=None;entry.access_paths=[]
         launch(again);assert request('127.0.0.2').status_code==200 and request('127.0.0.2',auth=False).status_code==401
     finally:
         stop();server.shutdown();server.server_close()

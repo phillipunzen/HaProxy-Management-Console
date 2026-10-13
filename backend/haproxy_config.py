@@ -41,7 +41,7 @@ def map_routes(config,maps):
             for site in auth.get('sites',[]):
                 if site['kind']=='route':preferences[(site['frontend'],site['backend'],site['domain'])]=(site['group'],site['forward'],site.get('replace_existing',False))
             tls={(p['frontend'],s['domain']):s['certificate'] for p in read(config) for s in p['sites']}
-            access={(s['frontend'],s['backend'],s['domain']):digest(s['policy']) for s in (access_metadata(config) or {}).get('sites',[]) if s['kind']=='route'}
+            access={(s['frontend'],s['backend'],s['domain']):digest({'policy':s['policy'],'profile':s.get('profile')}) for s in (access_metadata(config) or {}).get('sites',[]) if s['kind']=='route'}
             preferences=(preferences,tls,access)
         auth,tls,access=preferences;groups={}
         for name in names:
@@ -386,7 +386,7 @@ def document_fingerprint(config):
 
 
 def remember_document(config,doc):
-    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends or any(r.access_policy for r in doc.imported_routes)):return strip_document_metadata(config)
+    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends or doc.access_profiles or any(r.access_policy for r in doc.imported_routes)):return strip_document_metadata(config)
     snapshot=doc.model_dump(exclude={'version','imported_active_hash','imported_sources','imported_map_hashes'})
     if snapshot['imported_config'] is not None:snapshot['imported_config']=strip_document_metadata(snapshot['imported_config'])
     payload={'document':snapshot,'fingerprint':document_fingerprint(config)}

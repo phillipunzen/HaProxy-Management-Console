@@ -6,7 +6,7 @@ import re
 import shlex
 
 from pydantic import BaseModel,Field,ConfigDict,field_validator
-from backend.schemas import AccessPolicy,Host
+from backend.schemas import AccessPolicy,AccessProfile,Host
 from backend.haproxy_config import parse_sections,map_routes
 
 PREFIX='# haproxy-control-access '
@@ -20,6 +20,7 @@ class Site(BaseModel):
     domain:str=Field(max_length=253)
     path:str=Field(default='/',max_length=300)
     policy:AccessPolicy
+    profile:str | None=Field(default=None,pattern=r'^[a-zA-Z0-9_-]{1,80}$')
 
     @field_validator('domain')
     @classmethod
@@ -42,12 +43,22 @@ def read(config):
     try:
         if len(values)!=1 or len(values[0])>2*1024*1024:raise ValueError()
         data=json.loads(base64.b64decode(values[0],validate=True))
-        if not isinstance(data,dict) or set(data)!={'version','sites','blocks','digest'} or data['version']!=1:raise ValueError()
-        if not isinstance(data['sites'],list) or not 1<=len(data['sites'])<=2200 or digest(data['sites'])!=data['digest']:raise ValueError()
-        if not isinstance(data['blocks'],dict) or not 1<=len(data['blocks'])<=500:raise ValueError()
+        if not isinstance(data,dict) or data.get('version') not in (1,2):raise ValueError()
+        profiled=data['version']==2
+        if set(data)!=({'version','sites','blocks','digest','profiles'} if profiled else {'version','sites','blocks','digest'}):raise ValueError()
+        profiles=[]
+        if profiled:
+            if not isinstance(data['profiles'],list) or not 1<=len(data['profiles'])<=100:raise ValueError()
+            profiles=[AccessProfile.model_validate(p).model_dump() for p in data['profiles']]
+            if profiles!=data['profiles'] or len({p['id'] for p in profiles})!=len(profiles) or len({p['name'].casefold() for p in profiles})!=len(profiles):raise ValueError()
+        if not isinstance(data['sites'],list) or not (0 if profiled else 1)<=len(data['sites'])<=2200:raise ValueError()
+        if digest({'profiles':profiles,'sites':data['sites']} if profiled else data['sites'])!=data['digest']:raise ValueError()
+        if not isinstance(data['blocks'],dict) or not (0 if profiled else 1)<=len(data['blocks'])<=500:raise ValueError()
         if any(not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',k) or not isinstance(v,str) or not re.fullmatch(r'[a-f0-9]{64}',v) for k,v in data['blocks'].items()):raise ValueError()
-        sites=[Site.model_validate(value).model_dump() for value in data['sites']]
+        sites=[site_dump(Site.model_validate(value)) for value in data['sites']]
         if sites!=data['sites']:raise ValueError()
+        lookup={p['id']:p for p in profiles}
+        if any(s.get('profile') and (s['profile'] not in lookup or s['policy']['networks']!=lookup[s['profile']]['networks']) for s in sites):raise ValueError()
         if len({(s['kind'],s['frontend'],s['backend'],s['domain'],s['path']) for s in sites})!=len(sites):raise ValueError()
         if {s['frontend'] for s in sites}!=set(data['blocks']):raise ValueError()
         return data
@@ -73,14 +84,28 @@ def strip_managed(config):
     return ''.join(output)
 
 
+def site_dump(site):
+    # Keep legacy v1 metadata byte-compatible when no profile is assigned.
+    return site.model_dump(exclude={'profile'} if site.profile is None else set())
+
+
+def policy_for(doc,item):
+    if not item.access_profile:return item.access_policy
+    profile=next((p for p in doc.access_profiles if p.id==item.access_profile),None)
+    if not profile:raise ValueError('Zugewiesenes IP-Filter-Profil fehlt: '+item.access_profile)
+    if item.access_policy:raise ValueError('IP-Filter-Profil und eigene Liste können nicht gleichzeitig gelten.')
+    return AccessPolicy(networks=profile.networks,paths=item.access_paths)
+
+
 def bindings(doc):
     result=[]
     for kind,entries in (('host',doc.hosts),('route',doc.imported_routes)):
         for item in entries:
-            if not item.access_policy or kind=='host' and not item.enabled:continue
+            policy=policy_for(doc,item)
+            if not policy or kind=='host' and not item.enabled:continue
             for domain in item.hostnames:
-                result.append(Site(kind=kind,frontend=item.frontend,backend='backend_'+item.id if kind=='host' else item.backend,
-                                   domain=domain,path=item.path if kind=='host' else '/',policy=item.access_policy).model_dump())
+                result.append(site_dump(Site(kind=kind,frontend=item.frontend,backend='backend_'+item.id if kind=='host' else item.backend,
+                                   domain=domain,path=item.path if kind=='host' else '/',policy=policy,profile=item.access_profile)))
     old=read(doc.imported_config or '')
     if old:
         # Raw/uneditable pre-existing sites stay restricted. Editable sites can
@@ -89,8 +114,13 @@ def bindings(doc):
         editable={(r.frontend,name,'/') for r in routes for name in r.hostnames}
         editable.update((h.frontend,name,h.path) for h in doc.hosts+doc.imported_managed_hosts for name in h.hostnames)
         owned={'backend_'+h.id for h in doc.imported_managed_hosts}|set(doc.removed_backends)
-        result += [site for site in old['sites'] if site['backend'] not in owned and site['frontend'] not in doc.removed_backends
-                   and (site['frontend'],site['domain'],site['path']) not in editable]
+        for site in old['sites']:
+            if site['backend'] in owned or site['frontend'] in doc.removed_backends or (site['frontend'],site['domain'],site['path']) in editable:continue
+            if site.get('profile'):
+                profile=next((p for p in doc.access_profiles if p.id==site['profile']),None)
+                if not profile:raise ValueError('IP-Filter-Profil wird noch von einer übernommenen Zugriffsregel verwendet: '+site['profile'])
+                site={**site,'policy':{**site['policy'],'networks':profile.networks}}
+            result.append(site)
     if len(result)>2200 or sum(len(s['policy']['networks']) for s in result)>20000:raise ValueError('IP-Zugriffslisten überschreiten das Server-Limit.')
     return result
 
@@ -98,13 +128,17 @@ def bindings(doc):
 def restore_document(doc):
     old=read(doc.imported_config or '')
     if old:
+        doc.access_profiles=[AccessProfile.model_validate(p) for p in old.get('profiles',[])]
         for kind,items in (('host',doc.hosts),('route',doc.imported_routes)):
             for item in items:
                 sites=[s for s in old['sites'] if s['kind']==kind and s['frontend']==item.frontend and s['backend']==('backend_'+item.id if kind=='host' else item.backend) and s['path']==(item.path if kind=='host' else '/') and s['domain'] in item.hostnames]
                 if sites:
-                    if len(sites)!=len(item.hostnames) or len({digest(s['policy']) for s in sites})!=1:
+                    if len(sites)!=len(item.hostnames) or len({digest({'policy':s['policy'],'profile':s.get('profile')}) for s in sites})!=1:
                         raise ValueError('Hostnamen mit unterschiedlichen IP-Regeln müssen getrennt bearbeitet werden.')
-                    item.access_policy=AccessPolicy.model_validate(sites[0]['policy'])
+                    item.access_profile=sites[0].get('profile')
+                    if item.access_profile:
+                        item.access_paths=sites[0]['policy']['paths'];item.access_policy=None
+                    else:item.access_policy=AccessPolicy.model_validate(sites[0]['policy'])
     return doc
 
 
@@ -141,7 +175,7 @@ def validate_document(doc):
 
 def inject(config,doc):
     config=strip_managed(config);sites=bindings(doc)
-    if not sites:return config
+    if not sites and not doc.access_profiles:return config
     if 'mgmt_access_' in config:raise ValueError('Namenskonflikt mit internen mgmt_access_-Regeln.')
     lines,sections=parse_sections(config);fronts={s.name:s for s in sections if s.kind in ('frontend','listen')};patch={};blocks={}
     for name in dict.fromkeys(s['frontend'] for s in sites):
@@ -167,7 +201,9 @@ def inject(config,doc):
         ending='\r\n' if lines[front.start].endswith('\r\n') else '\n'
         patch[front.start]=lines[front.start].rstrip('\r\n')+ending+text.replace('\n',ending)
     result=''.join(patch.get(i,line) for i,line in enumerate(lines))
-    data={'version':1,'sites':sites,'blocks':blocks,'digest':digest(sites)}
+    profiles=[p.model_dump() for p in doc.access_profiles]
+    data={'version':2 if profiles else 1,'sites':sites,'blocks':blocks,'digest':digest({'profiles':profiles,'sites':sites} if profiles else sites)}
+    if profiles:data['profiles']=profiles
     encoded=base64.b64encode(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).decode()
     if len(encoded)>2*1024*1024:raise ValueError('IP-Zugriffsmetadaten überschreiten das Server-Limit.')
     return result.rstrip('\r\n')+'\n'+META+encoded+'\n'

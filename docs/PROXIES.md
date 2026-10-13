@@ -130,7 +130,7 @@ Für diese Funktion genügt ein Update des Management-Containers. Das Docker-Arc
 
 ## IP-Zugriff pro Reverseproxy
 
-Unter **Proxy Hosts → Bearbeiten → IP-Zugriff** (auch bei übernommenen Domain-Zuordnungen) **Zugriff auf erlaubte IP-Adressen und Netze beschränken** aktivieren. Erlaubte IPv4-/IPv6-Adressen oder CIDR-Netze eintragen, z. B. `192.168.10.0/24`, `10.8.0.12` und `2001:db8::/32`. Ein Eintrag pro Zeile oder durch Kommas getrennt. CIDR-Netze werden auf ihre Netzadresse normalisiert. Bei aktivierter Beschränkung muss mindestens eine Adresse bzw. ein Netz angegeben sein.
+Unter **Proxy Hosts → Bearbeiten → IP-Filter → Zugriffsprofil** (auch bei übernommenen Domain-Zuordnungen) ein gespeichertes Profil oder **Eigene IP-Liste für diesen Eintrag** auswählen. Bei einer eigenen Liste **Zugriff auf erlaubte IP-Adressen und Netze beschränken** aktivieren. Erlaubte IPv4-/IPv6-Adressen oder CIDR-Netze eintragen, z. B. `192.168.10.0/24`, `10.8.0.12` und `2001:db8::/32`. Ein Eintrag pro Zeile oder durch Kommas getrennt. CIDR-Netze werden auf ihre Netzadresse normalisiert. Bei aktivierter Beschränkung muss mindestens eine Adresse bzw. ein Netz angegeben sein.
 
 **Geschützte Pfad-Präfixe** leer lassen, um den gesamten Eintrag mit allen Hostnamen und seinem Proxy-Host-Pfad einzuschränken. Für einzelne Bereiche absolute Präfixe wie `/admin` oder `/internal` eintragen. Andere Pfade bleiben ohne diese IP-Beschränkung erreichbar. `/admin` umfasst auch `/administrator`; `/admin/` umfasst nur das Präfix mit dem abschließenden Schrägstrich. Bei einem Proxy-Host-Pfad `/api` müssen geschützte Präfixe ebenfalls unter `/api` liegen. Mehrere passende Beschränkungen gelten gemeinsam, auch bei überlappenden Wildcard-Domains oder Proxy-Host-Pfaden.
 
@@ -140,6 +140,18 @@ Es gilt die Client-IP, die HAProxy sieht (`fc_src`), nicht ein vom Besucher gese
 
 IP-Liste und zentrale Basic Auth gelten gemeinsam: Auch eine erlaubte Adresse muss sich anmelden, wenn eine Gruppe zugewiesen ist. Die explizit aktivierte HTTP-Challenge des eigenen `public_http`-Listeners bleibt für ACME erreichbar. Eigene importierte Challenge-Regeln entsprechend in der Pfadauswahl berücksichtigen.
 
-Nach **Im Entwurf speichern → Prüfen & anwenden** wird die Einschränkung aktiv. Deaktivieren des Schalters entfernt die zentralen IP-Regeln; ursprüngliche manuelle Zugriffsbeschränkungen bleiben erhalten. Die Einstellungen werden beim erneuten Einlesen wiederhergestellt. Markierte IP-Regelblöcke und ihre Metadaten müssen zusammenpassen; manuell veränderte Blöcke werden nicht stillschweigend überschrieben. Diese Funktion benötigt ein Update des Management-Containers, keine neuen ENV-Variablen und keinen Agent-Update.
+Nach **Im Entwurf speichern → Prüfen & anwenden** wird die Einschränkung aktiv. **Kein IP-Filter** wählen, um die zentralen IP-Regeln für diesen Eintrag zu entfernen; ursprüngliche manuelle Zugriffsbeschränkungen bleiben erhalten. Die Einstellungen werden beim erneuten Einlesen wiederhergestellt. Markierte IP-Regelblöcke und ihre Metadaten müssen zusammenpassen; manuell veränderte Blöcke werden nicht stillschweigend überschrieben. Diese Funktion benötigt ein Update des Management-Containers, keine neuen ENV-Variablen und keinen Agent-Update.
 
 Syntax und Regelreihenfolge: [HAProxy-Konfigurationshandbuch](https://docs.haproxy.org/3.2/configuration.html#4.2-http-request).
+
+## Wiederverwendbare IP-Filter-Profile
+
+Unter **IP-Filter-Profile** den HAProxy-Server auswählen und **Profil hinzufügen** wählen. Name, optionale Beschreibung und erlaubte IPv4-/IPv6-Adressen bzw. CIDR-Netze eintragen. Die Profile werden im Entwurf dieses Servers in MariaDB gespeichert; andere Server und Infrastrukturen behalten ihre eigenen Profile. Es ist keine Datenbankmigration erforderlich.
+
+**Vorlage: Nur lokaler Zugriff** öffnet ein anpassbares Profil mit `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`, `127.0.0.1` und `::1`. Diese Vorlage erlaubt alle genannten privaten Netze. Für das eigene LAN oder VPN auf die tatsächlich erlaubten Netze eingrenzen. Öffentliche IPv6-Präfixe des LANs müssen ausdrücklich ergänzt werden. Die Vorlage wird erst mit Speichern angelegt und keinem Host automatisch zugewiesen.
+
+Unter **Proxy Hosts → Bearbeiten → IP-Filter → Zugriffsprofil** das Profil auswählen. Geschützte Pfad-Präfixe bleiben pro Eintrag einstellbar; leer schützt den gesamten Eintrag einschließlich zusätzlicher Hostnamen. Eine eigene Liste lässt sich weiterhin verwenden. Beim Wechsel vom Profil auf eine eigene Liste werden dessen Netze und die Pfadauswahl übernommen; spätere Profiländerungen beeinflussen diese Kopie nicht.
+
+Ein Profil bearbeiten, um die Netze aller zugewiesenen Einträge gemeinsam zu ändern. Die Übersicht zeigt Anzahl und Domains der Zuordnungen. **Prüfen & anwenden** aktiviert den aktuellen Entwurf. Bis dahin bleibt HAProxy unverändert. Ein verwendetes Profil lässt sich erst löschen, wenn seine Zuordnungen geändert oder entfernt wurden; dies gilt auch für deaktivierte Hosts. Ein ungültiges oder fehlendes Profil wird abgelehnt und führt nicht zu unbeschränktem Zugriff.
+
+Beim erneuten Einlesen bleiben Profile und Zuordnungen erhalten. Bei externen Änderungen werden erkennbare Zuordnungen anhand der geprüften IP-Regelblöcke wiederhergestellt. Profildaten und markierte Regeln nicht getrennt im Texteditor bearbeiten. Bereits bestehende eigene IP-Listen werden weiterhin unterstützt und nicht automatisch in ein Profil umgewandelt. Diese Funktion benötigt das aktuelle Management-Image, keine neuen ENV-Variablen und kein Agent-Update.
