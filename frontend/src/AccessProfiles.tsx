@@ -1,3 +1,5 @@
+import {AccessBadge} from './AccessVisibility';
+import {summarizeAccess} from './accessVisibility';
 import {useId,useState} from 'react';
 import {Plus,Settings2,ShieldCheck,Trash2} from 'lucide-react';
 import {AccessPolicyEditor,type AccessPolicy} from './AccessPolicy';
@@ -6,7 +8,7 @@ export type AccessProfile={id:string;name:string;description:string;networks:str
 export type AccessAssignment={access_policy?:AccessPolicy|null;access_profile?:string|null;access_paths?:string[]};
 const profileId=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
 export const localProfile=():AccessProfile=>({id:profileId(),name:'Nur lokaler Zugriff',description:'Private IPv4-Netze, IPv6-ULA und Loopback. Auf die tatsächlich erlaubten LAN-/VPN-Netze anpassen.',networks:['10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','fc00::/7','127.0.0.1','::1']});
-export function AccessFilterEditor({value,profiles,onChange,disabled=false,basePath='/'}:{value:AccessAssignment;profiles:AccessProfile[];onChange:(value:AccessAssignment)=>void;disabled?:boolean;basePath?:string}){
+export function AccessFilterEditor({value,profiles,onChange,disabled=false,basePath='/',manual=false}:{value:AccessAssignment;profiles:AccessProfile[];onChange:(value:AccessAssignment)=>void;disabled?:boolean;basePath?:string;manual?:boolean}){
   const id=useId(),profile=profiles.find(p=>p.id===value.access_profile);
   const selection=value.access_profile?'profile:'+value.access_profile:value.access_policy?'custom':'off';
   return <section className="proxy-options-editor">
@@ -15,6 +17,7 @@ export function AccessFilterEditor({value,profiles,onChange,disabled=false,baseP
       const selected=e.target.value;
       onChange(selected.startsWith('profile:')?{access_profile:selected.slice(8),access_paths:value.access_profile?value.access_paths||[]:value.access_policy?.paths||[],access_policy:null}:selected==='custom'?{access_profile:null,access_paths:[],access_policy:{networks:profile?.networks||value.access_policy?.networks||[''],paths:value.access_paths||[]}}:{access_profile:null,access_paths:[],access_policy:null});
     }}><option value="off">Kein IP-Filter</option><option value="custom">Eigene IP-Liste für diesen Eintrag</option>{profiles.map(p=><option key={p.id} value={'profile:'+p.id}>{p.name}</option>)}{value.access_profile&&!profile&&<option value={selection}>Profil nicht mehr vorhanden</option>}</select><small>Profile unter „IP-Filter-Profile“ auf diesem HAProxy-Server verwalten. Änderungen gelten für alle zugewiesenen Einträge nach Prüfen & anwenden.</small></div>
+    <AccessBadge summary={summarizeAccess({...value,path:basePath},profiles,manual)}/>
     {value.access_profile&&<>
       {!profile?<div className="notice error" role="alert">Das zugewiesene Profil fehlt. Ein anderes Profil oder eine eigene Liste auswählen.</div>:<><p>{profile.description}</p><div className="field"><label>Erlaubte IP-Adressen / CIDR-Netze · {profile.name}</label><pre className="wizard-command">{profile.networks.join('\n')}</pre></div></>}
       <div className="field"><label htmlFor={id+'-paths'}>Geschützte Pfad-Präfixe (optional)</label><textarea id={id+'-paths'} disabled={disabled} rows={3} maxLength={6500} value={(value.access_paths||[]).join('\n')} onChange={e=>onChange({...value,access_paths:e.target.value.split('\n')})} placeholder={basePath==='/'?'/admin\n/internal':basePath+'/admin'}/><small>Leer = gesamter Eintrag mit allen Hostnamen{basePath!=='/'?' unter '+basePath:''}. /admin trifft auch /administrator. Pfade gelten nur für diesen Eintrag und werden vor Umschreibungen geprüft.</small></div>

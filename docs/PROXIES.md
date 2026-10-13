@@ -155,3 +155,17 @@ Unter **Proxy Hosts → Bearbeiten → IP-Filter → Zugriffsprofil** das Profil
 Ein Profil bearbeiten, um die Netze aller zugewiesenen Einträge gemeinsam zu ändern. Die Übersicht zeigt Anzahl und Domains der Zuordnungen. **Prüfen & anwenden** aktiviert den aktuellen Entwurf. Bis dahin bleibt HAProxy unverändert. Ein verwendetes Profil lässt sich erst löschen, wenn seine Zuordnungen geändert oder entfernt wurden; dies gilt auch für deaktivierte Hosts. Ein ungültiges oder fehlendes Profil wird abgelehnt und führt nicht zu unbeschränktem Zugriff.
 
 Beim erneuten Einlesen bleiben Profile und Zuordnungen erhalten. Bei externen Änderungen werden erkennbare Zuordnungen anhand der geprüften IP-Regelblöcke wiederhergestellt. Profildaten und markierte Regeln nicht getrennt im Texteditor bearbeiten. Bereits bestehende eigene IP-Listen werden weiterhin unterstützt und nicht automatisch in ein Profil umgewandelt. Diese Funktion benötigt das aktuelle Management-Image, keine neuen ENV-Variablen und kein Agent-Update.
+
+## Interne und externe Proxy Hosts erkennen
+
+Die Übersicht **Proxy Hosts** enthält für neue Hosts und übernommene Domain-Zuordnungen eine eigene Spalte **Zugriff**. Die Kennzeichnung wird aus dem Arbeitsentwurf berechnet, einschließlich zugewiesener IP-Filter-Profile und eigener IP-Listen:
+
+- **Intern · private Netze:** Der gesamte Eintrag erlaubt ausschließlich private IPv4-Netze, IPv6-ULA, Loopback oder Link-Local-Adressen.
+- **Extern möglich:** Kein zentraler IP-Filter ist zugewiesen. Eine Basic-Auth-Anmeldung macht einen Eintrag nicht intern.
+- **Eingeschränkt:** Der gesamte Eintrag hat eine IP-Liste, die auch öffentliche Adressen oder größere Netze enthält. Das kann beispielsweise ein Büro mit öffentlicher IP oder ein öffentliches IPv6-LAN-Präfix sein.
+- **Teilweise geschützt:** Nur einzelne Pfad-Präfixe sind eingeschränkt. Andere Pfade können weiterhin extern erreichbar sein.
+- **Manuell prüfen:** Eine Zuordnung ist unvollständig oder eigene Zugriffsregeln wurden im importierten Frontend, Backend oder in defaults erkannt. Die Anzeige wertet solche manuellen Regeln nicht vollständig aus.
+
+Mit den Schaltflächen über den Tabellen nach Zugriffsbereich filtern; die Zahlen beziehen sich auf alle neuen Hosts und übernommenen Domain-Zuordnungen dieses Servers. Die Suche berücksichtigt beide Tabellen und zusätzliche Hostnamen. Filter verändern die Konfiguration nicht. Der Status lässt sich aufklappen, um Profil, erlaubte Netze und geschützte Pfade zu sehen. Beim Bearbeiten wird die Kennzeichnung direkt aktualisiert. Host-Editor und Bestätigung zeigen den Domainnamen, die Tabelle zusätzlich das Frontend.
+
+Die Kennzeichnung beschreibt die **gespeicherte Konfiguration im Entwurf**, nicht die aktuelle Erreichbarkeit aus dem Internet. Änderungen gelten erst nach **Prüfen & anwenden**. Listener, Portweiterleitungen, Firewall, manuelle Regeln und vorgeschaltete Proxys können den tatsächlichen Zugriff beeinflussen. Maßgeblich ist die Client-IP, die HAProxy sieht; die IP des Backend-Servers bestimmt den Zugriffsbereich nicht. Ein privates Backend ist daher nicht automatisch ein interner Proxy Host. Öffentliche LAN-IPv6-Präfixe werden als **Eingeschränkt** angezeigt.
