@@ -255,7 +255,7 @@ def import_preview_for(i,body):
     except ValueError as error:raise HTTPException(422,str(error))
     current=Document.model_validate(i.document).model_dump()
     incoming=preview['document']
-    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates','removed_backends','access_profiles')
+    editable=('hosts','rules','frontends','backends','imported_backends','imported_routes','frontend_certificates','removed_backends','removed_frontends','access_profiles')
     if any(current.get(key) for key in editable) and any(current.get(key)!=incoming.get(key) for key in editable):
         preview['warnings'].append('Die Übernahme ersetzt den aktuellen Arbeitsentwurf durch den eingelesenen Stand. Noch nicht angewendete Änderungen vorher anwenden oder sichern; Einlesen & Vorschau allein ändert den Entwurf nicht.')
     preview['warnings']+=bundle['warnings'];preview['active_hash']=bundle['hash']
@@ -478,6 +478,8 @@ def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
     i=instance(db,id);cap=agent(i);doc=Document.model_validate(i.document)
     try:
         config=generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc)))
+        from backend.frontend_delete import require_listener
+        require_listener(config)
         error=None
     except ValueError as exc:
         config=doc.imported_config or '';error=str(exc)
@@ -496,7 +498,7 @@ def proxy_layout(id:int,user=Depends(current_user),db=Depends(get_db)):
     proxies=inventory(config)
     # An unrelated incomplete listener/auth setting may require the fallback
     # inventory; it must still respect deletions already saved in the draft.
-    proxies=[p for p in proxies if not (p['kind'] in ('backend','listen') and p['name'] in doc.removed_backends)]
+    proxies=[p for p in proxies if not (p['kind'] in ('backend','listen') and p['name'] in doc.removed_backends) and not (p['kind'] in ('frontend','listen') and p['name'] in doc.removed_frontends)]
     for proxy in proxies:
         proxy['routes']=[r for r in proxy['routes'] if r['backend'] not in doc.removed_backends]
     pools,_=extract_backends(config)
@@ -518,12 +520,12 @@ def save_document(id:int,body:Document,user=Depends(operator),db=Depends(get_db)
     i.document=body.model_dump(exclude={'version'});i.document_version+=1
     audit(db,user.username,'document.saved',i.name);db.commit();return i.document|{'version':i.document_version,'basic_auth_existing':existing}
 
-class BackendDeleteIn(BaseModel):
+class ProxyDeleteIn(BaseModel):
     name:str=Field(pattern=r'^[a-zA-Z0-9_.-]{1,100}$')
     version:int=Field(ge=0)
 
 @app.post('/api/instances/{id}/backend-delete-preview')
-def preview_backend_delete(id:int,body:BackendDeleteIn,user=Depends(operator),db=Depends(get_db)):
+def preview_backend_delete(id:int,body:ProxyDeleteIn,user=Depends(operator),db=Depends(get_db)):
     from backend.backend_delete import plan
     i=instance(db,id)
     if body.version!=i.document_version:raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
@@ -532,7 +534,7 @@ def preview_backend_delete(id:int,body:BackendDeleteIn,user=Depends(operator),db
     return summary|{'version':i.document_version}
 
 @app.post('/api/instances/{id}/backend-delete')
-def delete_backend(id:int,body:BackendDeleteIn,user=Depends(operator),db=Depends(get_db)):
+def delete_backend(id:int,body:ProxyDeleteIn,user=Depends(operator),db=Depends(get_db)):
     from backend.backend_delete import plan
     basic_auth.lock_directory(db)
     i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
@@ -545,6 +547,31 @@ def delete_backend(id:int,body:BackendDeleteIn,user=Depends(operator),db=Depends
     i.document=doc.model_dump(exclude={'version'});i.document_version+=1
     audit(db,user.username,'backend.deleted',i.name,body.name);db.commit()
     return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
+
+@app.post('/api/instances/{id}/frontend-delete-preview')
+def preview_frontend_delete(id:int,body:ProxyDeleteIn,user=Depends(operator),db=Depends(get_db)):
+    from backend.frontend_delete import plan
+    i=instance(db,id)
+    if body.version!=i.document_version:raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
+    try:_,summary=plan(Document.model_validate(i.document),body.name)
+    except ValueError as error:raise HTTPException(422,str(error))
+    return summary|{'version':i.document_version}
+
+@app.post('/api/instances/{id}/frontend-delete')
+def delete_frontend(id:int,body:ProxyDeleteIn,user=Depends(operator),db=Depends(get_db)):
+    from backend.frontend_delete import plan
+    basic_auth.lock_directory(db)
+    i=db.scalar(select(Instance).where(Instance.id==id).with_for_update().execution_options(populate_existing=True))
+    if not i:raise HTTPException(404)
+    if body.version!=i.document_version:raise HTTPException(409,'Entwurf wurde parallel geändert. Bitte neu laden.')
+    try:
+        doc,_=plan(Document.model_validate(i.document),body.name)
+        validate_document(db,doc)
+    except ValueError as error:raise HTTPException(422,str(error))
+    i.document=doc.model_dump(exclude={'version'});i.document_version+=1
+    audit(db,user.username,'frontend.deleted',i.name,body.name);db.commit()
+    return i.document|{'version':i.document_version,'basic_auth_existing':basic_auth.existing_rules(i.document.get('imported_config'))}
+
 
 @app.post('/api/instances/{id}/generate')
 def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
@@ -562,6 +589,8 @@ def generate_config(id:int,user=Depends(operator),db=Depends(get_db)):
                 if {s.path:s.hash for s in doc.imported_sources}!={s['path']:s['hash'] for s in bundle['sources']} or {m.path:m.hash for m in doc.imported_map_hashes}!={m['host_path']:m['hash'] for m in bundle['maps']}:
                     raise HTTPException(409,'Eine Konfigurations- oder Map-Datei wurde geändert. Erneut importieren.')
         config=generate(doc,cap,basic_auth.snapshots(db,basic_auth.ids(doc)))
+        from backend.frontend_delete import require_listener
+        require_listener(config)
         assigned={name for names in doc.frontend_certificates.values() for name in names}
         assigned.update(h.certificate for h in doc.hosts if h.enabled and h.certificate)
         assigned.update(r.certificate for r in doc.imported_routes if r.certificate)

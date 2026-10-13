@@ -298,6 +298,8 @@ def generate_imported(doc):
     from backend.backend_delete import remove_sections
     from backend.managed_rules import strip as strip_rules
     original=remove_original_tool_hosts(strip_rules(strip_document_metadata(doc.imported_config)),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
+    from backend.frontend_delete import remove_sections as remove_frontends
+    original=remove_frontends(original,doc.removed_frontends)
     baseline,_=extract_backends(original)
     removed=set(doc.removed_backends)
     if {b.name for b in doc.imported_backends}!={b.name for b in baseline if b.name not in removed}:
@@ -386,7 +388,7 @@ def document_fingerprint(config):
 
 
 def remember_document(config,doc):
-    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends or doc.access_profiles or any(r.access_policy for r in doc.imported_routes)):return strip_document_metadata(config)
+    if not (doc.imported_config is None or doc.hosts or doc.frontends or doc.backends or doc.rules or doc.removed_backends or doc.removed_frontends or doc.access_profiles or any(r.access_policy for r in doc.imported_routes)):return strip_document_metadata(config)
     snapshot=doc.model_dump(exclude={'version','imported_active_hash','imported_sources','imported_map_hashes'})
     if snapshot['imported_config'] is not None:snapshot['imported_config']=strip_document_metadata(snapshot['imported_config'])
     payload={'document':snapshot,'fingerprint':document_fingerprint(config)}

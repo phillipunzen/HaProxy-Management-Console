@@ -14,7 +14,7 @@ import { FileCode2, Loader2, Upload, Check, Settings2, Plus, Trash2, Terminal, C
 export type ImportedBackend={proxy_options?:string[]|null;name:string;mode:string;balance:string|null;servers:{name:string;address:string;port:number;weight:number;tls:boolean;tls_verify?:boolean|null}[]};
 export type ImportedRoute={access_profile?:string|null;access_paths?:string[];access_policy?:AccessPolicy|null;id:string;frontend:string;domain:string;aliases?:string[];backend:string;basic_auth_group?:number|null;basic_auth_forward?:boolean;basic_auth_replace_existing?:boolean;certificate?:string|null};
 export type ExistingAuth={kind:string;name:string;rules:string[]};
-export type ImportedFields={access_profiles?:AccessProfile[];removed_backends?:string[];imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[];basic_auth_existing?:ExistingAuth[]};
+export type ImportedFields={removed_frontends?:string[];access_profiles?:AccessProfile[];removed_backends?:string[];imported_config?:string|null;imported_backends?:ImportedBackend[];imported_routes?:ImportedRoute[];imported_route_frontends?:string[];imported_sources?:{path:string;hash:string}[];basic_auth_existing?:ExistingAuth[]};
 type Request=(path:string,method?:string,body?:unknown)=>Promise<any>;
 
 export function ConfigImport({id,request,onDone,onBusy,canUpdateAgent=false}:{canUpdateAgent?:boolean;onBusy?:(value:boolean)=>void;id:number;request:Request;onDone:(doc:any)=>void}){

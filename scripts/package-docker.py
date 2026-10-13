@@ -25,6 +25,7 @@ files = {
     'backend/managed_rules.py': root / 'backend' / 'managed_rules.py',
     'backend/access_control.py': root / 'backend' / 'access_control.py',
     'backend/backend_delete.py': root / 'backend' / 'backend_delete.py',
+    'backend/frontend_delete.py': root / 'backend' / 'frontend_delete.py',
     'backend/proxy_options.py': root / 'backend' / 'proxy_options.py',
     'backend/schemas.py': root / 'backend' / 'schemas.py',
     'backend/haproxy_config.py': root / 'backend' / 'haproxy_config.py',

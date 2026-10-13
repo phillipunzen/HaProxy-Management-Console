@@ -84,8 +84,8 @@ def strip(config):return read_and_strip(config)[1]
 
 def validate_document(doc):
     clean=strip(doc.imported_config or '')
-    fronts={s.name:s.mode for s in parse_sections(clean)[1] if s.kind in ('frontend','listen') and s.name not in doc.removed_backends}
-    if doc.imported_config is None:fronts['public_http']='http'
+    fronts={s.name:s.mode for s in parse_sections(clean)[1] if s.kind in ('frontend','listen') and s.name not in set(doc.removed_backends)|set(doc.removed_frontends)}
+    if doc.imported_config is None and 'public_http' not in doc.removed_frontends:fronts['public_http']='http'
     fronts.update({f.name:f.mode for f in doc.frontends})
     for rule in doc.rules:
         if rule.enabled and fronts.get(rule.frontend or 'public_http')!='http':

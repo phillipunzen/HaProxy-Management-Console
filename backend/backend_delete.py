@@ -58,6 +58,8 @@ def remove_sections(config,names):
 def plan(doc,name):
     from backend.managed_rules import strip as strip_rules
     original=remove_original_tool_hosts(strip_rules(doc.imported_config or ''),doc.imported_managed_hosts,[m.model_dump() for m in doc.imported_maps])
+    from backend.frontend_delete import remove_sections as remove_frontends
+    original=remove_frontends(original,doc.removed_frontends)
     raw=[s for s in parse_sections(original)[1] if s.kind in ('backend','listen') and s.name==name and name not in doc.removed_backends]
     if len(raw)>1:raise ValueError('Mehrere gleichnamige Pools: Namen zuerst im Texteditor bereinigen.')
     own=next((b for b in doc.backends if b.name==name),None)

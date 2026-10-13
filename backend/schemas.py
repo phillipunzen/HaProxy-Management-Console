@@ -421,6 +421,7 @@ class Document(BaseModel):
     imported_backends: list[ImportedBackend] = Field(default_factory=list,max_length=500)
     # Tombstones against the unchanged imported baseline; no active file is edited.
     removed_backends: list[str] = Field(default_factory=list,max_length=500)
+    removed_frontends: list[str] = Field(default_factory=list,max_length=500)
     imported_routes: list[ImportedRoute] = Field(default_factory=list,max_length=2000)
     imported_route_frontends: list[str] = Field(default_factory=list,max_length=500)
     imported_maps: list[ImportedMap] = Field(default_factory=list,max_length=100)
@@ -432,11 +433,11 @@ class Document(BaseModel):
     def acme_ok(cls,v):
         return BackendServer(address=v).address
 
-    @field_validator('removed_backends')
+    @field_validator('removed_backends','removed_frontends')
     @classmethod
     def removed_names(cls,value):
         if len(set(value))!=len(value) or any(not re.fullmatch(r'[a-zA-Z0-9_.-]{1,100}',name) for name in value):
-            raise ValueError('Gelöschte Backend-Namen müssen gültig und eindeutig sein.')
+            raise ValueError('Gelöschte Proxy-Namen müssen gültig und eindeutig sein.')
         return value
 
     @model_validator(mode='after')
@@ -445,6 +446,7 @@ class Document(BaseModel):
         if len(profiles)!=len(self.access_profiles) or len({p.name.casefold() for p in self.access_profiles})!=len(profiles):
             raise ValueError('IP-Filter-Profilnamen und IDs müssen pro Server eindeutig sein.')
         for item in self.hosts+self.imported_routes:
+            if item.frontend in self.removed_frontends:raise ValueError('Proxy Host verweist auf ein gelöschtes Frontend: '+item.frontend)
             if item.access_profile and item.access_profile not in profiles:
                 raise ValueError('Zugewiesenes IP-Filter-Profil fehlt. Zuordnung ändern, bevor das Profil gelöscht wird.')
             if item.access_profile and item.access_policy:

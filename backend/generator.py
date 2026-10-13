@@ -27,9 +27,14 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.managed_proxy import enhance
     from backend.access_control import inject as restrict
     from backend.managed_rules import inject as apply_rules
+    def finish(config):
+        if doc.removed_frontends:
+            from backend.frontend_delete import require_listener
+            require_listener(config)
+        return remember_document(config,doc)
     if doc.imported_config is not None:
         from backend.haproxy_config import generate_imported
-        return remember_document(restrict(inject(apply_rules(enhance(generate_imported(doc),doc,capabilities),doc),doc,basic_auth),doc),doc)
+        return finish(restrict(inject(apply_rules(enhance(generate_imported(doc),doc,capabilities),doc),doc,basic_auth),doc))
     socket = capabilities['runtime_socket_config']
     cert_dir = capabilities['cert_dir_config']
     for p in (socket, cert_dir):
@@ -62,4 +67,6 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         for i, server in enumerate(host.servers):
             tls = backend_tls(server)
             out += [f'    server srv_{i+1} {address(server.address,server.port)} weight {server.weight} check{tls}']
-    return remember_document(restrict(inject(apply_rules(enhance('\n'.join(out) + '\n',doc,capabilities),doc),doc,basic_auth),doc),doc)
+    from backend.frontend_delete import remove_sections as remove_frontends
+    config=remove_frontends('\n'.join(out)+'\n',doc.removed_frontends)
+    return finish(restrict(inject(apply_rules(enhance(config,doc,capabilities),doc),doc,basic_auth),doc))

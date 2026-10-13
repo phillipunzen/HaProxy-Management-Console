@@ -110,12 +110,14 @@ def bindings(doc):
     if old:
         # Raw/uneditable pre-existing sites stay restricted. Editable sites can
         # explicitly clear/change their policy, without resurrecting old rules.
-        _,routes,_=map_routes(doc.imported_config,[m.model_dump() for m in doc.imported_maps])
+        from backend.basic_auth import strip_managed as strip_auth
+        from backend.managed_rules import strip as strip_rules
+        _,routes,_=map_routes(strip_rules(strip_managed(strip_auth(doc.imported_config))),[m.model_dump() for m in doc.imported_maps])
         editable={(r.frontend,name,'/') for r in routes for name in r.hostnames}
         editable.update((h.frontend,name,h.path) for h in doc.hosts+doc.imported_managed_hosts for name in h.hostnames)
         owned={'backend_'+h.id for h in doc.imported_managed_hosts}|set(doc.removed_backends)
         for site in old['sites']:
-            if site['backend'] in owned or site['frontend'] in doc.removed_backends or (site['frontend'],site['domain'],site['path']) in editable:continue
+            if site['backend'] in owned or site['frontend'] in set(doc.removed_backends)|set(doc.removed_frontends) or (site['frontend'],site['domain'],site['path']) in editable:continue
             if site.get('profile'):
                 profile=next((p for p in doc.access_profiles if p.id==site['profile']),None)
                 if not profile:raise ValueError('IP-Filter-Profil wird noch von einer übernommenen Zugriffsregel verwendet: '+site['profile'])
