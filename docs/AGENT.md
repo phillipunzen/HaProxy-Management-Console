@@ -4,7 +4,7 @@ Die Management-WebUI spricht mit einem **Agenten auf dem HAProxy-Host**. Dieser 
 
 ## Installation über den WebUI-Assistenten
 
-Unter **Server → Server verbinden** Nativ oder Docker sowie **LAN** oder **Internet / andere Infrastruktur** wählen. Für einen Internet-Host bietet der Assistent **VPN** oder **direktes HTTPS**. Der Management-Server verbindet sich zum Agenten; die Management-WebUI muss dafür nicht veröffentlicht werden.
+Unter **Server → Server verbinden** Nativ oder Docker sowie **LAN** oder **Internet / andere Infrastruktur** wählen. Für einen Internet-Host bietet der Assistent **VPN**, **direktes HTTPS** oder **HTTPS über vorhandenen Reverseproxy**. Der Management-Server verbindet sich zum Agenten; die Management-WebUI muss dafür nicht veröffentlicht werden.
 
 Die vier Schritte führen durch Installation, Host-Pfade, Vorbereitung/Download und den persönlichen Einzeiler mit Agent-Token und SHA-256-Prüfsummen. Bei Docker mit einer vorhandenen Compose-Datei die Dateistruktur **Compose-Ordner mit haproxy.cfg, certs, vhosts und dnsmapping.cfg** auswählen und z. B. `/srv/haproxy` angeben. Dann werden die Pfade, Mounts und Vorbereitung passend angezeigt. Anschließend den Installationsbefehl auf dem HAProxy-Host per SSH ausführen und im geöffneten Dialog **Verbindung prüfen & speichern** wählen.
 
@@ -91,6 +91,40 @@ In **Host- und Provider-Firewall** den Agent-Port ausschließlich für die öffe
 ```bash
 sudo ufw allow from MANAGEMENT_AUSGANGS_IP to AGENT_BIND_IP port 9101 proto tcp
 ```
+
+### HTTPS über einen vorhandenen Reverseproxy
+
+Im Assistenten **Internet / andere Infrastruktur → HTTPS über vorhandenen Reverseproxy** wählen. Zwei getrennte Adressen eintragen:
+
+| Zweck | Beispiel |
+| --- | --- |
+| Interne Bind-IP des Agenten auf dem HAProxy-Host | `172.18.0.1` (tatsächlich vorhandene private Host-/Bridge-IP verwenden) |
+| Interner Agent-Port | `9091` (oder `9101`) |
+| Öffentliche HTTPS-Adresse des Agenten | `https://agent.example.de` = Port **443** |
+| Abweichender öffentlicher Proxy-Port | `https://agent.example.de:8443` |
+
+Der Installationsbefehl startet einen HTTP-Agenten ausschließlich auf der internen Bind-IP und dem internen Port. Er benötigt hierfür keine TLS-Dateien. Das Management speichert dagegen die öffentliche **HTTPS**-Adresse; die HTTP-Freigabe der gespeicherten Management-Verbindung bleibt deaktiviert. Das Zertifikat liegt am Reverseproxy und muss die öffentliche Agent-Domain abdecken. `https://agent.example.de:443` ist ebenfalls gültig. Keine `/profiles/…`-Pfade in die Basis-URL schreiben: der Management-Client ergänzt sie automatisch.
+
+Ein nativer Reverseproxy auf demselben Host kann den Agenten über `127.0.0.1:9091` ansprechen. Bei HAProxy in Docker bezeichnet `127.0.0.1` dagegen den Container selbst. Für dein externes `dockernet` eine vorhandene private Host-IP oder die tatsächlich konfigurierte Netzwerk-Gateway-IP verwenden; z. B. mit `docker network inspect dockernet --format '{{json .IPAM.Config}}'` prüfen. Den Agent-Port nur für den Reverseproxy freigeben und nicht öffentlich weiterleiten. Der HTTP-Abschnitt muss lokal bzw. in einem vertrauenswürdigen privaten Netz liegen; über ein fremdes Netzwerk hierfür ebenfalls TLS oder VPN verwenden.
+
+Auf dem HTTPS-Frontend die Agent-Domain zu einem eigenen HTTP-Backend routen. Die folgenden Direktiven in die **vorhandene** Konfiguration integrieren (Domain/Bind-IP ersetzen), das bestehende TLS-Frontend mit Zertifikat beibehalten:
+
+```haproxy
+# Im bestehenden HTTPS-Frontend:
+    acl management_agent_host hdr(host) -i agent.example.de agent.example.de:443
+    use_backend management_agent if management_agent_host
+
+backend management_agent
+    mode http
+    timeout server 330s
+    server agent 172.18.0.1:9091 check
+```
+
+Alle HTTP-Methoden (`GET`, `POST`, `PUT`, `DELETE`), Pfade und den `Authorization: Bearer …`-Header unverändert weiterreichen. Keine zusätzliche Basic-Auth-Anmeldung oder Login-Weiterleitung davorschalten; der Agent prüft bereits den Profil-Token. Bei Proxy-Software mit Größenlimits mindestens 2 MiB zulassen. Für Zertifikatsaktionen ausreichend lange Timeouts vorsehen (z. B. 330 Sekunden); auch vorgezogene Timeouts anderer Proxys berücksichtigen. Den HTTPS-Zugang auf die öffentliche Ausgangs-IP des Management-Standorts begrenzen; bei Cloudflare den DNS-Record auf **DNS only** setzen.
+
+Ohne Token antwortet `https://agent.example.de/profiles/DEIN_PROFIL` mit HTTP 401. Nach Ausführung des Installationsbefehls im Assistenten **Verbindung prüfen & speichern** wählen: hierfür wird die öffentliche HTTPS-Adresse benutzt, nicht `http://INTERNE_IP:9091`. Bei einem bereits installierten Agenten kann dieselbe HTTPS-Adresse unter **Agent bereits installiert** bzw. **Server bearbeiten** eingetragen werden; Profil und vorhandenen Token beibehalten.
+
+Wenn der verwaltete HAProxy gleichzeitig diesen Agent-Zugang weiterleitet, fällt der Zugang beim Stoppen des Proxys aus. Für den Wiederstart deshalb einen unabhängigen Weg wie SSH, VPN oder einen separaten Management-Proxy bereithalten. Den vorhandenen Agenten nicht erneut als neues Profil mit anderem Bind-Port installieren; bestehende Profile behalten ihren Endpunkt. Zum Wechsel einer bestehenden HTTP-/HTTPS-Agent-Bindung den vorhandenen systemd-Endpunkt und ggf. `listener`-Metadaten in `agent.json` bewusst anpassen und den Agenten neu starten.
 
 Der **Download** ist die Gegenrichtung: der Internet-Host lädt einmalig Installer/ZIP und bei Updates erneut. Eine LAN-Adresse wie `http://192.168.10.70:8101` funktioniert ohne VPN nicht. Im Assistenten daher eine vom Host erreichbare Download-Basis-URL angeben, z. B. `https://agent-download.example.de`; alternativ die vorkonfigurierte Adresse über das VPN nutzen. Öffentlich nur den [Download-Dienst](AGENT_DOWNLOADS.md) hinter HTTPS veröffentlichen, nicht die Management-API. Download-Port allein stellt keine Verbindung zum Agenten her. Die individuelle Download-Adresse im Assistenten gilt für den erzeugten Installationsbefehl; für spätere Update-Befehle die erreichbare Standard-Adresse über `AGENT_DOWNLOAD_ORIGIN` einstellen.
 

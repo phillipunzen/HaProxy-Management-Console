@@ -141,3 +141,16 @@ def test_https_unit_and_second_profile_write_paths_preserved(setup,monkeypatch,t
     assert '--ssl-certfile '+tls['cert_file'] in unit and '--ssl-keyfile '+tls['key_file'] in unit
     assert '-/etc/other/certs' in unit and '-/etc/other ' in unit
     assert json.loads(profile_file.read_text())['listener']['tls']==tls
+
+
+def test_reverse_proxy_installer_uses_internal_port_and_needs_no_tls_files(setup,monkeypatch,tmp_path):
+    execute,p,config,original,profile_file,calls=setup
+    encoded=base64.b64encode(json.dumps({'profile_name':'test','profile':p,'bind':'127.0.0.1','port':9091}).encode()).decode()
+    monkeypatch.setenv('HAPROXY_AGENT_SETUP_B64',encoded)
+    code=SCRIPT.replace('/etc/haproxy-control/agent.json',str(profile_file)).replace('/var/lib/haproxy-control',str(tmp_path/'state')).replace('/etc/systemd/system',str(tmp_path/'systemd'))
+    exec(compile(code,'installer','exec'),{})
+    unit=(tmp_path/'systemd/haproxy-control-agent.service').read_text()
+    assert '--host 127.0.0.1 --port 9091 ' in unit
+    assert '--ssl-certfile' not in unit and '--ssl-keyfile' not in unit
+    assert ':443' not in unit and '--port 443' not in unit
+    assert json.loads(profile_file.read_text())['listener']=={'bind':'127.0.0.1','port':9091,'tls':None}

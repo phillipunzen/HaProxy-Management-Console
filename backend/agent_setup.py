@@ -29,7 +29,8 @@ class AgentSetupIn(InstanceMetadataIn):
     runtime_socket_config: str = '/run/haproxy/admin.sock'
     cert_dir_config: str = '/etc/haproxy/certs'
     allow_http: bool = False
-    connection: Literal['lan', 'vpn', 'https'] = 'lan'
+    connection: Literal['lan', 'vpn', 'https', 'reverse_proxy'] = 'lan'
+    public_agent_url: str = Field(default='',max_length=500)
     agent_hostname: str = Field(default='',max_length=253)
     tls_cert_file: str = '/etc/haproxy-control/tls/fullchain.pem'
     tls_key_file: str = '/etc/haproxy-control/tls/privkey.pem'
@@ -39,12 +40,12 @@ class AgentSetupIn(InstanceMetadataIn):
     @classmethod
     def host_ip(cls, value):
         address = ipaddress.ip_address(value)
-        if address.is_loopback or address.is_unspecified or address.is_link_local or address.is_multicast:
+        if address.is_unspecified or address.is_link_local or address.is_multicast:
             raise ValueError('Eine erreichbare Host-IP verwenden; kein localhost oder 0.0.0.0.')
         return str(address)
 
     @field_validator('config_path', 'runtime_socket', 'cert_dir', 'container_config_dir',
-                     'runtime_socket_config', 'cert_dir_config', 'tls_cert_file', 'tls_key_file')
+                     'runtime_socket_config', 'cert_dir_config')
     @classmethod
     def absolute_path(cls, value):
         path = PurePosixPath(value)
@@ -56,12 +57,28 @@ class AgentSetupIn(InstanceMetadataIn):
     def valid_setup(self):
         address = ipaddress.ip_address(self.host)
         private = any(address in ipaddress.ip_network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','100.64.0.0/10','fc00::/7') if address.version == ipaddress.ip_network(net).version)
-        if self.connection != 'https':
+        if address.is_loopback and self.connection != 'reverse_proxy':
+            raise ValueError('Loopback nur für einen Reverseproxy auf demselben Host verwenden.')
+        if self.connection == 'reverse_proxy':
+            if not (private or address.is_loopback):
+                raise ValueError('Internen HTTP-Agenten nur an eine private Host-IP oder Loopback binden.')
+            if not self.allow_http:
+                raise ValueError('HTTP für den internen Abschnitt zwischen Reverseproxy und Agent ausdrücklich zulassen.')
+            url = urlsplit(self.public_agent_url)
+            if any(ord(c)<=32 or ord(c)>=127 for c in self.public_agent_url) or any(c in self.public_agent_url for c in ('\\','"',"'")) or url.scheme != 'https' or not url.hostname or url.username is not None or url.password is not None or url.query or url.fragment or url.path not in ('','/'):
+                raise ValueError('Öffentliche Agent-Adresse als HTTPS-Basis-URL ohne Zugangsdaten oder Profilpfad angeben.')
+            try: public_port = url.port
+            except ValueError: raise ValueError('Ungültiger öffentlicher HTTPS-Port.')
+            if public_port is not None and not 1 <= public_port <= 65535: raise ValueError('Ungültiger öffentlicher HTTPS-Port.')
+            self.public_agent_url = self.public_agent_url.rstrip('/')
+        elif self.connection != 'https':
             if not private:
                 raise ValueError('HTTP nur über eine private LAN- oder VPN-IP verwenden. Für öffentliche Adressen HTTPS wählen.')
             if not self.allow_http:
                 raise ValueError('HTTP im privaten LAN oder VPN ausdrücklich zulassen.')
         else:
+            self.tls_cert_file = self.absolute_path(self.tls_cert_file)
+            self.tls_key_file = self.absolute_path(self.tls_key_file)
             if self.allow_http:
                 raise ValueError('Für HTTPS die HTTP-Freigabe deaktivieren.')
             self.agent_hostname = self.agent_hostname.strip().lower()
@@ -130,6 +147,7 @@ def build_plan(body: AgentSetupIn, origin: str, root: Path):
     command=installation_command(body.download_origin or origin,root,'HAPROXY_AGENT_SETUP_B64='+shlex.quote(encoded))
     host = body.agent_hostname if body.connection == 'https' else (f'[{body.host}]' if ':' in body.host else body.host)
     scheme = 'https' if body.connection == 'https' else 'http'
-    return {'command': command, 'instance': {'name': body.name, 'agent_url': f'{scheme}://{host}:{body.port}',
-            'profile': body.profile, 'token': profile['token'], 'allow_http': body.connection != 'https', 'notes': '',
+    agent_url = body.public_agent_url if body.connection == 'reverse_proxy' else f'{scheme}://{host}:{body.port}'
+    return {'command': command, 'instance': {'name': body.name, 'agent_url': agent_url,
+            'profile': body.profile, 'token': profile['token'], 'allow_http': body.connection in ('lan','vpn'), 'notes': '',
             'tags':body.tags,'location':body.location,'infrastructure_id':body.infrastructure_id}}

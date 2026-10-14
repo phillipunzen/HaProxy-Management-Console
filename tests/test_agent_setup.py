@@ -99,3 +99,40 @@ def test_vpn_ips_supported_without_public_http(host):
 ])
 def test_transport_and_download_fail_closed(changes):
     with pytest.raises(ValidationError):AgentSetupIn(**(values()|changes))
+
+
+@pytest.mark.parametrize('url',['https://agent.example.de','https://agent.example.de:443','https://agent.example.de:8443/','https://[2001:db8::2]:443'])
+@pytest.mark.parametrize('kind',['native','docker'])
+def test_reverse_proxy_keeps_public_https_and_internal_listener_separate(url,kind):
+    from backend.schemas import InstanceIn
+    from agent.setup_checks import tls_options
+    data=values(kind)|dict(connection='reverse_proxy',public_agent_url=url,port=9091,tls_cert_file='',tls_key_file='')
+    body=AgentSetupIn(**data);plan=build_plan(body,'https://download.example.de',ROOT)
+    encoded=next(arg.split('=',1)[1] for arg in shlex.split(plan['command']) if arg.startswith('HAPROXY_AGENT_SETUP_B64='))
+    setup=json.loads(base64.b64decode(encoded))
+    assert setup['port']==9091 and setup['bind']=='192.168.10.71'
+    assert 'tls' not in setup and tls_options(setup)==''
+    assert plan['instance']['agent_url']==url.rstrip('/')
+    assert plan['instance']['allow_http'] is False
+    InstanceIn.model_validate(plan['instance'])
+
+
+@pytest.mark.parametrize('host',['127.0.0.1','::1','172.18.0.1'])
+def test_reverse_proxy_can_bind_locally_without_exposing_agent(host):
+    body=AgentSetupIn(**(values()|dict(connection='reverse_proxy',public_agent_url='https://agent.example.de',host=host)))
+    plan=build_plan(body,'https://download.example.de',ROOT)
+    assert plan['instance']['agent_url']=='https://agent.example.de'
+
+
+@pytest.mark.parametrize('changes',[
+    dict(public_agent_url='http://agent.example.de'),
+    dict(public_agent_url='https://agent.example.de/profiles/edge'),
+    dict(public_agent_url='https://user:pass@agent.example.de'),
+    dict(public_agent_url='https://agent.example.de:65536'),
+    dict(public_agent_url='https://agent.example.de:0'),
+    dict(public_agent_url='https://agent.example.de?q=1'),
+    dict(public_agent_url='https://agent.example.de#fragment'),
+    dict(public_agent_url=''),dict(host='8.8.8.8'),dict(allow_http=False),
+])
+def test_reverse_proxy_rejects_public_plaintext_listener_and_invalid_external_url(changes):
+    with pytest.raises(ValidationError):AgentSetupIn(**(values()|dict(connection='reverse_proxy',public_agent_url='https://agent.example.de')|changes))
