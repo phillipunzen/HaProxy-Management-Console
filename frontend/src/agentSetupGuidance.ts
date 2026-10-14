@@ -19,8 +19,10 @@ cd ${q(root)}\n# Vorhandene Compose-Datei und Verzeichnisse vor Änderungen sich
 }
 
 export function recreateComposeCommands(value:DockerPaths,container:string) {
+  const composeRoot=parent(parent(value.config_path));
   return `(
 set -e
+cd ${q(composeRoot)}
 # Compose-Dateinamen und Service-Namen ggf. anpassen.\nsudo docker compose -f docker-compose.yml config --quiet\nsudo docker exec ${q(container)} haproxy -c -f ${q(value.container_config_dir+'/haproxy.cfg')} -f ${q(value.container_config_dir+'/vhosts')}\nsudo docker compose -f docker-compose.yml up -d --force-recreate haproxy
 )`;
 }
