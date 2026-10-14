@@ -17,9 +17,14 @@ test('preparation preserves originals and refuses different target copies',()=>{
  assert.match(commands,/sudo cmp --/);
  assert.match(commands,/sudo cp -p --/);
  assert.match(commands,/docker exec 'haproxy' id -u/);
- assert.doesNotMatch(commands,/rm |mv /);
+ assert.match(commands,/docker inspect --format '\{\{\.Image\}\}' 'haproxy'/);
+ assert.match(commands,/docker cp .*\/usr\/local\/etc\/haproxy\/errors\/\./);
+ assert.match(commands,/\[ ! -e "config\/errors\/\$haproxy_error_name" \]/);
+ assert.doesNotMatch(commands,/rm .*config|mv /);
  const recreate=recreateComposeCommands(composeDirectoryPaths('/srv/haproxy'),'haproxy');
  assert.match(recreate,/-f '\/usr\/local\/etc\/haproxy\/vhosts'/);
+ assert.match(recreate,/compose -f docker-compose.yml run --rm --no-deps haproxy haproxy -c/);
+ assert.doesNotMatch(recreate,/docker exec/);
 });
 test('shell examples quote user-provided container names',()=>{
  const result=prepareComposeDirectory('/srv/haproxy',"h';touch /tmp/injection;'");

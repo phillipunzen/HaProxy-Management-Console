@@ -1,5 +1,7 @@
 # Beispiel für /srv/haproxy: zunächst nach docs/AGENT.md vorbereiten.
 # Bestehende haproxy.cfg und dnsmapping.cfg nach ./config kopieren.
+# Fehlerseiten aus dem verwendeten Image nach ./config/errors übernehmen (siehe Anleitung).
+# Der Verzeichnis-Mount verdeckt die im Image enthaltenen Fehlerseiten.
 # Leere Mount-Ziele ./config/certs und ./config/vhosts vorher anlegen.
 # ./run muss für UID/GID des HAProxy-Prozesses beschreibbar sein.
 networks:

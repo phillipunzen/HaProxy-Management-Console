@@ -37,18 +37,46 @@ Bei folgender Struktur bleibt das externe Docker-Netzwerk `dockernet` unverände
   vhosts/
 ```
 
-Vor Änderungen Compose, Konfiguration, Zertifikate und Vhosts sichern. Im Compose-Verzeichnis ein eigenes Config-Verzeichnis anlegen und die beiden bisherigen einzelnen Dateien nach `config/` kopieren; Originale behalten. Bestehende abweichende Zielkopien zuerst vergleichen. UID/GID des laufenden Containers verwenden:
+Vor Änderungen Compose, Konfiguration, Zertifikate und Vhosts sichern. Im Compose-Verzeichnis ein eigenes Config-Verzeichnis anlegen und die bisherigen einzelnen Dateien nach `config/` kopieren; Originale behalten. Bestehende abweichende Zielkopien zuerst vergleichen. Der Verzeichnis-Mount verdeckt auch die im Image enthaltenen Fehlerseiten: Deshalb übernimmt die Vorbereitung diese aus dem **bereits verwendeten Image** nach `config/errors`. Eigene Seiten unter `errors/` haben Vorrang vor den Image-Vorgaben; vorhandene Ziel-Dateien bleiben erhalten. UID/GID des laufenden Containers verwenden:
 
 ```bash
-cd /srv/haproxy
-sudo install -d -m 755 config config/certs config/vhosts
+(
+set -e
+cd '/srv/haproxy'
+# Vorhandene Compose-Datei und Verzeichnisse vor Änderungen sichern.
+sudo install -d -m 755 '/srv/haproxy/config' '/srv/haproxy/config/certs' '/srv/haproxy/config/vhosts'
+# Vorhandene Dateien behalten; abweichende Kopien zuerst vergleichen.
 for file in haproxy.cfg dnsmapping.cfg; do
-  if [ -e "config/$file" ]; then sudo cmp -- "$file" "config/$file" || exit 1;
-  else sudo cp -p -- "$file" "config/$file"; fi
+  if [ -f "$file" ]; then
+    if [ -e "config/$file" ]; then sudo cmp -- "$file" "config/$file" || exit 1;
+    else sudo cp -p -- "$file" "config/$file"; fi
+  fi
 done
-haproxy_uid=$(sudo docker exec haproxy id -u)
-haproxy_gid=$(sudo docker exec haproxy id -g)
-sudo install -d -m 750 -o "$haproxy_uid" -g "$haproxy_gid" run
+# Der Verzeichnis-Mount verdeckt die Fehlerseiten aus dem Image.
+# Exakt das bereits verwendete Image ohne dessen Bind-Mounts auslesen.
+haproxy_errors_tmp=$(mktemp -d)
+haproxy_errors_container=''
+trap 'if [ -n "$haproxy_errors_container" ]; then sudo docker rm "$haproxy_errors_container" >/dev/null; fi; sudo rm -rf -- "$haproxy_errors_tmp"' EXIT
+haproxy_errors_image=$(sudo docker inspect --format '{{.Image}}' 'haproxy')
+haproxy_errors_container=$(sudo docker create "$haproxy_errors_image")
+sudo docker cp "$haproxy_errors_container:/usr/local/etc/haproxy/errors/." "$haproxy_errors_tmp/"
+sudo install -d -m 755 config/errors
+# Eigene Fehlerseiten bevorzugen; bereits vorhandene Ziel-Dateien behalten.
+for haproxy_errors_source in errors "$haproxy_errors_tmp"; do
+  [ -d "$haproxy_errors_source" ] || continue
+  for haproxy_error_file in "$haproxy_errors_source"/*; do
+    [ -f "$haproxy_error_file" ] || continue
+    haproxy_error_name=$(basename "$haproxy_error_file")
+    if [ ! -e "config/errors/$haproxy_error_name" ] && [ ! -L "config/errors/$haproxy_error_name" ]; then
+      sudo cp -p -- "$haproxy_error_file" "config/errors/$haproxy_error_name"
+    fi
+  done
+done
+# UID/GID des laufenden HAProxy-Containers verwenden.
+haproxy_uid=$(sudo docker exec 'haproxy' id -u)
+haproxy_gid=$(sudo docker exec 'haproxy' id -g)
+sudo install -d -m 750 -o "$haproxy_uid" -g "$haproxy_gid" '/srv/haproxy/run'
+)
 ```
 
 Die leeren Verzeichnisse `config/certs` und `config/vhosts` dienen als Mount-Ziele für die bestehenden Verzeichnisse; ohne sie kann Docker keine verschachtelten Mounts im schreibgeschützten Config-Verzeichnis anlegen.
@@ -67,13 +95,21 @@ Die vollständige passende Vorlage liegt im ZIP unter `examples/haproxy-existing
 
 Die Config- und Zertifikats-Mounts bleiben im Container schreibgeschützt. Der Agent läuft auf dem Host und schreibt dort; lediglich der gemeinsame Runtime-Socket benötigt einen beschreibbaren Container-Mount. Das Konfigurationsverzeichnis enthält weder die Compose-Datei noch deren `.env`.
 
-Compose prüfen, die bestehende HAProxy-Konfiguration prüfen und Container neu erstellen (kurze Unterbrechung möglich; Dateinamen anpassen):
+Compose prüfen und **die neuen Mounts** in einem separaten Prüfcontainer testen. Dabei werden keine Service-Ports veröffentlicht. Nur nach erfolgreicher HAProxy-Prüfung wird der laufende Container neu erstellt (kurze Unterbrechung möglich; Dateinamen und Service-Namen anpassen). Eine Prüfung per `docker exec` im alten Container reicht hier nicht aus, weil dieser noch seine bisherigen Mounts verwendet.
 
 ```bash
+(
+set -e
+cd '/srv/haproxy'
+# Compose-Dateinamen und Service-Namen ggf. anpassen.
 sudo docker compose -f docker-compose.yml config --quiet
-sudo docker exec haproxy haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg -f /usr/local/etc/haproxy/vhosts
+# Neue Mounts in einem Prüfcontainer testen, bevor der laufende Proxy ersetzt wird.
+sudo docker compose -f docker-compose.yml run --rm --no-deps haproxy haproxy -c -f '/usr/local/etc/haproxy/haproxy.cfg' -f '/usr/local/etc/haproxy/vhosts'
 sudo docker compose -f docker-compose.yml up -d --force-recreate haproxy
+)
 ```
+
+Falls HAProxy nach einer früheren Umstellung bereits mit `errorfile: error opening file` abbricht: Den Abschnitt zur Übernahme der Fehlerseiten aus dem Vorbereitungsblock im Compose-Verzeichnis ausführen. Er funktioniert auch bei einem gestoppten Container. Danach den Prüfcontainer aus dem obigen Prüfblock verwenden und bei erfolgreicher Prüfung `sudo docker compose -f docker-compose.yml up -d haproxy` ausführen. Erst wenn HAProxy wieder läuft, den Agent-Installationsbefehl erneut ausführen.
 
 Danach im Assistenten die vorbereitete Struktur auswählen. Die erzeugten Agent-Pfade sind `/srv/haproxy/config/haproxy.cfg`, `/srv/haproxy/run/admin.sock`, `/srv/haproxy/certs`; die Zertifikatspfade im Container bleiben `/usr/local/etc/haproxy/certs`. Die Vhosts werden anhand der laufenden Container-Argumente erkannt. Beim ersten Einlesen **Aktive Dateien vom HAProxy-Agenten** verwenden: eine spätere bestätigte Migration konsolidiert die geladenen Dateien, sichert alle Originale und entfernt doppelte aktive Definitionen aus den alten Dateien. Ohne Prüfen & anwenden wird der laufende Dienst nicht durch einen grafischen Entwurf ersetzt.
 
