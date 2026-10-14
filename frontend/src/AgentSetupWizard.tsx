@@ -28,12 +28,16 @@ export function AgentSetupWizard({request,onConnected,onExisting,infrastructures
   const [internet,setInternet]=useState(false);
   const [downloadConfirmed,setDownloadConfirmed]=useState(false);
   const [plan,setPlan]=useState<Plan|null>(null);
+  const [loading,setLoading]=useState(true),[resumed,setResumed]=useState(false),[discardConfirm,setDiscardConfirm]=useState(false);
+  const [setupIdentity,setSetupIdentity]=useState<{setup_id:string;setup_version:number}|null>(null);
   const [defaultDownload,setDefaultDownload]=useState('');
-  useEffect(()=>{let active=true;request('/agent-setup').then(data=>{if(active)setDefaultDownload(data.download_origin);}).catch(()=>{if(active)setError('Download-Adresse konnte nicht geladen werden. Erreichbare Basis-URL ausdrücklich angeben.');});return()=>{active=false;};},[request]);
+  useEffect(()=>{let active=true;request('/agent-setup').then(data=>{if(!active)return;setDefaultDownload(data.download_origin);if(data.pending_setup){const pending=data.pending_setup;setSetupIdentity({setup_id:pending.setup_id,setup_version:pending.setup_version});setValue(old=>({...old,...pending.body}));setPlan(pending.plan);setInternet(pending.body.connection!=='lan');setDownloadConfirmed(true);setResumed(true);setStep(3);if(pending.body.kind==='docker'&&pending.body.cert_dir_config==='/usr/local/etc/haproxy/certs'&&pending.body.config_path.endsWith('/config/haproxy.cfg')){setLayout('compose');setComposeRoot(pending.body.config_path.slice(0,-'/config/haproxy.cfg'.length));}}}).catch(e=>{if(active)setError((e as Error).message);}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[request]);
   const commandRef=useRef<HTMLTextAreaElement>(null);
   function update(key:string,v:unknown){setValue(old=>({...old,[key]:v}));setError('');}
-  async function generate(){if(!defaultDownload&&!value.download_origin){setError('Eine erreichbare Download-Basis-URL angeben.');return;}if(internet&&!downloadConfirmed){setError('Bestätige zuerst, dass der HAProxy-Host die Download-Adresse erreichen kann.');return;}setBusy(true);setError('');try{setPlan(await request('/agent-setup','POST',value));setStep(3);setCopied(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  async function generate(){if(!defaultDownload&&!value.download_origin){setError('Eine erreichbare Download-Basis-URL angeben.');return;}if(internet&&!downloadConfirmed){setError('Bestätige zuerst, dass der HAProxy-Host die Download-Adresse erreichen kann.');return;}setBusy(true);setError('');try{const next=await request('/agent-setup','POST',{...value,...setupIdentity});setPlan(next);setSetupIdentity({setup_id:next.setup_id,setup_version:next.setup_version});setStep(3);setCopied(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
   async function connect(){if(!plan)return;setBusy(true);setError('');try{await request('/instances','POST',plan.instance);await onConnected();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  async function discard(){if(!setupIdentity)return;setBusy(true);setError('');try{await request('/agent-setup','DELETE',setupIdentity);setSetupIdentity(null);setPlan(null);setResumed(false);setDiscardConfirm(false);setStep(0);setDownloadConfirmed(false);setCopied(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  if(loading)return <div className="form-body"><div className="notice"><Loader2 size={18} className="spin"/><span>Begonnene Einrichtung wird geprüft …</span></div></div>;
   async function copy(){
     try {if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(plan!.command);
       else {commandRef.current?.focus();commandRef.current?.select();if(!document.execCommand('copy'))throw new Error('Bitte den markierten Befehl manuell kopieren.');}
@@ -42,6 +46,7 @@ export function AgentSetupWizard({request,onConnected,onExisting,infrastructures
   }
   return <div className="form-body setup-wizard">
     <ol className="wizard-steps" aria-label="Einrichtungsschritte">{['Installation','Host & Pfade','Vorbereitung','Befehl & Verbindung'].map((label,i)=><li key={label} className={i===step?'active':i<step?'done':''}><span>{i<step?<Check size={14}/>:i+1}</span>{label}</li>)}</ol>
+    {resumed&&<div className="notice"><CheckCircle2 size={18}/><span>Deine begonnene Einrichtung wurde wiederhergestellt. Der Agent-Token bleibt derselbe, auch nach einem Management-Neustart. Falls der Installationsbefehl bereits ausgeführt wurde, kannst du direkt die Verbindung prüfen.</span></div>}
     {error&&<div role="alert" className="notice error">{error}</div>}
     {step===0&&<form onSubmit={e=>{e.preventDefault();setStep(1);}}>
       <h3>Wie läuft HAProxy auf diesem Host?</h3><p className="wizard-intro">Der Assistent erstellt einen Installationsbefehl für einen vorhandenen HAProxy auf Debian oder Ubuntu mit systemd.</p>
@@ -73,6 +78,7 @@ export function AgentSetupWizard({request,onConnected,onExisting,infrastructures
       <div className="modal-actions"><button type="button" disabled={busy} className="button secondary" onClick={()=>setStep(1)}><ChevronLeft size={15}/>Zurück</button><button type="submit" disabled={busy} className="button">{busy?<Loader2 className="spin" size={16}/>:<Terminal size={16}/>}Installationsbefehl erstellen</button></div>
     </form>}
     {step===3&&plan&&<>
+      <div className="notice"><CheckCircle2 size={18}/><span>Diese Einrichtung ist verschlüsselt in MariaDB gespeichert. Du kannst den Dialog schließen und über „Server hinzufügen“ mit demselben Token fortsetzen. Als Server erscheint sie nach „Verbindung prüfen & speichern“.</span></div>
       <h3>Befehl auf {value.host} ausführen</h3><p className="wizard-intro">Per SSH auf den HAProxy-Host einloggen und den Befehl einmal ausführen. Er installiert den Agenten, erzeugt sein Profil und ergänzt bei Bedarf den Runtime-Socket. HAProxy wird nach erfolgreicher Config-Prüfung neu geladen; die bisherige Datei wird gesichert.</p>
       <textarea ref={commandRef} className="wizard-command" aria-label="Installationsbefehl" readOnly rows={5} value={plan.command} onClick={e=>e.currentTarget.select()}/>
       <button type="button" className="button secondary" onClick={()=>void copy()}>{copied?<CheckCircle2 size={16}/>:<Copy size={16}/>} {copied?'Befehl kopiert':'Befehl kopieren'}</button>
@@ -83,5 +89,6 @@ export function AgentSetupWizard({request,onConnected,onExisting,infrastructures
       <p className="wizard-intro">Wenn der Dialog geschlossen wurde, lässt sich der installierte Agent mit Profilname und Token aus <code>/etc/haproxy-control/agent.json</code> über „Agent bereits installiert“ verbinden. <a href="/api/agent-guide" target="_blank" rel="noreferrer">Vollständige Anleitung</a></p>
       <div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={()=>{setPlan(null);setStep(1);}}>Angaben ändern</button><button type="button" className="button" disabled={busy} onClick={()=>void connect()}>{busy?<Loader2 size={16} className="spin"/>:<CheckCircle2 size={16}/>}Verbindung prüfen & speichern</button></div>
     </>}
+    {setupIdentity&&<div className="setup-discard"><button type="button" className="text-button red-text" disabled={busy} onClick={()=>setDiscardConfirm(true)}>Begonnene Einrichtung verwerfen</button>{discardConfirm&&<div className="notice error" role="alert"><span>Nur den gespeicherten Einrichtungsentwurf verwerfen? Ein bereits installierter Agent und sein Token bleiben auf dem Host bestehen. Zum erneuten Verbinden dann den vorhandenen Token aus der Agent-Konfiguration verwenden.<div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={()=>setDiscardConfirm(false)}>Beibehalten</button><button type="button" className="button danger" disabled={busy} onClick={()=>void discard()}>Einrichtung verwerfen</button></div></span></div>}</div>}
   </div>;
 }

@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -24,7 +24,8 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError,SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,InstanceMetadata,Infrastructure,InstanceInfrastructure,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
+from backend.db import Base,engine,SessionLocal,get_db,now,User,LoginSession,Instance,AgentSetupDraft,InstanceMetadata,Infrastructure,InstanceInfrastructure,Revision,MetricLatest,Audit,BasicAuthDirectory,BasicAuthDeployment
+from backend import agent_setup_drafts
 from backend import metrics as metric_store
 from backend import topology as topology_store
 from backend import proxy_health as proxy_health_store
@@ -125,6 +126,8 @@ def agent(i,path='',method='GET',body=None,timeout=10):
             raise HTTPException(result.status_code if result.status_code in (403,404,405,409,422,502,504) else 502,detail)
         if result.status_code>=300: raise HTTPException(502,'Agent-Weiterleitungen sind nicht erlaubt.')
         return result.json()
+    except InvalidToken:
+        raise HTTPException(503,'Gespeicherter Agent-Token kann nicht entschlüsselt werden. Den bisherigen ENCRYPTION_KEY in der Management-.env wiederherstellen; bei Neustarts keinen neuen Schlüssel erzeugen.')
     except (httpx.RequestError,ValueError):
         raise HTTPException(502,'Agent nicht erreichbar. Adresse, TLS-Zertifikat und Firewall prüfen.')
 
@@ -205,12 +208,22 @@ async def agent_update_error(request,error):
 SETUP_ROOT = Path(__file__).resolve().parent.parent
 
 @app.get('/api/agent-setup')
-def agent_setup_defaults(user=Depends(admin)):
-    return {'download_origin':settings.agent_download_origin or settings.app_origin}
+def agent_setup_defaults(user=Depends(admin),db=Depends(get_db)):
+    origin=settings.agent_download_origin or settings.app_origin
+    row=db.get(AgentSetupDraft,user.id)
+    return {'download_origin':origin,'pending_setup':agent_setup_drafts.response(row,cipher,origin,SETUP_ROOT) if row else None}
 
 @app.post('/api/agent-setup')
-def agent_setup(body:AgentSetupIn,user=Depends(admin)):
-    return build_plan(body, settings.agent_download_origin or settings.app_origin, SETUP_ROOT)
+def agent_setup(body:AgentSetupIn,user=Depends(admin),db=Depends(get_db)):
+    draft=agent_setup_drafts.save(db,user.id,body,cipher,settings.agent_download_origin or settings.app_origin,SETUP_ROOT)
+    audit(db,user.username,'agent.setup.saved',body.name);db.commit()
+    return draft['plan']|{'setup_id':draft['setup_id'],'setup_version':draft['setup_version']}
+
+@app.delete('/api/agent-setup')
+def agent_setup_discard(body:agent_setup_drafts.DraftIdentity,user=Depends(admin),db=Depends(get_db)):
+    agent_setup_drafts.discard(db,user.id,body)
+    audit(db,user.username,'agent.setup.discarded');db.commit()
+    return {'ok':True}
 
 @app.post('/api/instances/{id}/agent-update')
 def agent_update(id:int,user=Depends(admin),db=Depends(get_db)):
@@ -377,6 +390,7 @@ def add_instance(body:InstanceIn,user=Depends(admin),db=Depends(get_db)):
                notes=body.notes,token_cipher=cipher.encrypt(body.token.encode()).decode(),document=Document().model_dump())
     cap=agent(i);i.kind=cap['kind']
     db.add(i);db.flush();metadata=store_instance_metadata(db,i.id,body,check_version=False)
+    agent_setup_drafts.complete(db,user.id,body,cipher,settings.agent_download_origin or settings.app_origin,SETUP_ROOT)
     audit(db,user.username,'instance.created',i.name);db.commit()
     return public_instance(i,metadata,infrastructures.assignment(db,i.id))
 

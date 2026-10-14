@@ -28,6 +28,15 @@ class LoginSession(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
+class AgentSetupDraft(Base):
+    __tablename__ = 'agent_setup_drafts'
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    setup_id: Mapped[str] = mapped_column(String(32), unique=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    data_cipher: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
 class BasicAuthUser(Base):
     __tablename__ = 'basic_auth_users'
     id: Mapped[int] = mapped_column(primary_key=True)

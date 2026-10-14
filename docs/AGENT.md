@@ -12,6 +12,18 @@ Der Agent liegt unter `/opt/haproxy-control-agent`; Profile liegen unter `/etc/h
 
 Der Installer prüft auch die tatsächlich geladenen zusätzlichen `-f`-Dateien. Diese müssen ebenfalls über Verzeichnis-Mounts erreichbar sein, damit eine spätere Migration atomar schreiben und wiederherstellen kann. Bei HTTPS prüft er zunächst Zertifikat, passenden Schlüssel, Laufzeit und Agent-Hostname. Danach ergänzt er bei Bedarf den Runtime-Socket, prüft die komplette Konfiguration und lädt HAProxy neu. Bei einem Fehler wird die alte Konfiguration wiederhergestellt. Cloudflare- oder Hetzner-Token für HAProxy-Zertifikate anschließend im Zertifikatsdialog hinterlegen; LEGO wird mit installiert.
 
+## Begonnene Einrichtung nach einem Management-Neustart fortsetzen
+
+Sobald der Assistent den Installationsbefehl erzeugt, speichert er die begonnene Einrichtung samt Agent-Token **verschlüsselt in MariaDB**. Pro Administrator wird eine begonnene Einrichtung aufbewahrt. Beim erneuten Öffnen von **Server hinzufügen** wird derselbe Entwurf mit demselben Token geladen – auch nach Schließen des Browsers, erneutem Login oder Neustart des Management-Containers. Keine Zugangsdaten werden dafür in Browser-LocalStorage oder im Container-Dateisystem gespeichert.
+
+Wurde der Installationsbefehl bereits auf dem Host ausgeführt, danach **Verbindung prüfen & speichern** wählen; der Befehl muss nicht erneut ausgeführt werden. Bei einem Verbindungsfehler bleibt die Einrichtung erhalten. Änderungen der öffentlichen Reverseproxy-Adresse oder der Zuordnung behalten den Token bei. Einen anderen Host, internen Port oder ein anderes Profil erst nach ausdrücklichem **Begonnene Einrichtung verwerfen** beginnen. Gleichzeitige Änderungen werden über Entwurfs-ID und Version abgeglichen.
+
+Nach erfolgreichem Verbinden werden die endgültigen Zugangsdaten in der Serververbindung gespeichert und der Einrichtungsentwurf gelöscht. **Verwerfen löscht ausschließlich den Einrichtungsentwurf im Management**, nicht den Agenten auf dem Host oder seinen Token. Für einen bereits installierten Agenten anschließend **Agent bereits installiert** mit dem vorhandenen Profil und Token verwenden.
+
+Bei einer Installation mit einer älteren Version, deren Assistent noch nicht gespeichert wurde, lässt sich der verlorene Browser-Entwurf nicht nachträglich wiederherstellen. Der ursprüngliche Token bleibt aber auf dem HAProxy-Host unter `/etc/haproxy-control/agent.json` erhalten. Dort im benötigten Profil nachsehen und über **Agent bereits installiert** verbinden; den Token nicht durch erneute Generierung ersetzen und nicht in öffentliche Protokolle kopieren.
+
+**`ENCRYPTION_KEY` und die MariaDB-Verbindung bei Container-Neustarts und Updates beibehalten.** Der Management-Schlüssel entschlüsselt sowohl gespeicherte Server-Tokens als auch begonnene Einrichtungen. Ein neuer Schlüssel macht die bisherigen Zugangsdaten unlesbar; die Anwendung meldet das jetzt gezielt, statt einen neuen Agent-Token anzulegen. Die zusätzliche Tabelle `agent_setup_drafts` wird beim Start automatisch angelegt; keine neuen ENV-Variablen sind erforderlich.
+
 ## Bestehende Compose unter /srv/haproxy vorbereiten
 
 Bei folgender Struktur bleibt das externe Docker-Netzwerk `dockernet` unverändert:

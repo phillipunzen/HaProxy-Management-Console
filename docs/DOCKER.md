@@ -134,3 +134,5 @@ Unter **Infrastrukturen** Gruppen anlegen und Server unter **Server → Zuordnun
 ## Zertifikate und Proxy-Editor
 
 [LEGO-Aufträge übernehmen und Erneuerung steuern](docs/CERTIFICATES.md) sowie [HTTP-/TCP-Frontends und Backend-Pools aufbauen](docs/PROXIES.md). Nach einem Image-Update den Agenten auf bestehenden HAProxy-Hosts unter Server aktualisieren, um die neuen Zertifikatsfunktionen zu nutzen. LEGO und DNS-Zugangsdaten liegen auf dem HAProxy-Host, nicht im Management-Container.
+
+Begonnene Agent-Einrichtungen werden verschlüsselt in MariaDB gespeichert und unter **Server hinzufügen** mit demselben Token fortgesetzt. Das gilt auch nach einem Management-Container-Neustart. Die Tabelle `agent_setup_drafts` wird automatisch angelegt. `ENCRYPTION_KEY` und Datenbank unverändert beibehalten; für bereits installierte Agenten aus älteren, noch nicht gespeicherten Assistenten den vorhandenen Token aus `/etc/haproxy-control/agent.json` über **Agent bereits installiert** verwenden.

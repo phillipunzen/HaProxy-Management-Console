@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 
 class AgentSetupIn(InstanceMetadataIn):
+    setup_id: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+    setup_version: int | None = Field(default=None,ge=1)
     name: str = Field(min_length=1, max_length=120)
     kind: Literal['native', 'docker']
     host: str = Field(max_length=45)
@@ -129,10 +131,10 @@ def build_update_command(origin: str, root: Path):
     return {'command':installation_command(origin,root,'HAPROXY_AGENT_UPDATE_ONLY=1')}
 
 
-def build_plan(body: AgentSetupIn, origin: str, root: Path):
+def build_plan(body: AgentSetupIn, origin: str, root: Path, token: str | None = None):
     template = json.loads((root / 'agent/config.example.json').read_text())
     profile = template['profiles']['native' if body.kind == 'native' else 'docker-edge'].copy()
-    profile.update(token=secrets.token_urlsafe(48), config_path=body.config_path,
+    profile.update(token=token or secrets.token_urlsafe(48), config_path=body.config_path,
                    runtime_socket=body.runtime_socket, runtime_socket_config=body.runtime_socket_config,
                    cert_dir=body.cert_dir, cert_dir_config=body.cert_dir_config)
     if body.kind == 'native':
