@@ -168,3 +168,72 @@ userlist users
     doc=imported(original);doc.imported_backends[0].proxy_options=['http-request set-header Host backend.internal']
     value=backend_text(generate_imported(doc))
     assert value.index('http-request auth')<value.index('http-request set-header Host')
+
+
+REDIRECT='http-request redirect location /unifidrive/login code 302 if { path / }'
+
+@pytest.mark.parametrize('line',[REDIRECT,
+    'http-request redirect scheme https code 301 unless { ssl_fc }',
+    'http-request redirect prefix https://example.com code 308 if { path_beg /old } # keep',
+])
+def test_request_redirects_remain_editable_for_hosts_and_pools(line):
+    assert host(proxy_options=[line]).proxy_options==[line]
+    assert ImportedBackend(name='web',mode='http',servers=[],proxy_options=[line]).proxy_options==[line]
+    assert ManagedBackend(name='web',mode='http',servers=[{'address':'127.0.0.1'}],proxy_options=[line]).proxy_options==[line]
+
+
+@pytest.mark.parametrize('metadata',[True,False])
+def test_host_redirect_survives_reimport_and_can_be_removed(metadata):
+    text=generate(Document(hosts=[host(proxy_options=[REDIRECT])]),CAP)
+    if not metadata:text=strip_document_metadata(text)
+    doc=imported(text);assert doc.hosts[0].proxy_options==[REDIRECT]
+    doc.hosts[0].proxy_options=[]
+    assert REDIRECT not in backend_text(generate(doc,CAP),'backend_site')
+
+
+def test_imported_redirect_edit_and_removal_preserve_auth_and_shared_backend():
+    original=CONFIG.replace(' http-request set-path /old%[path] # old-path', ' '+REDIRECT+'\n http-request set-path /old%[path] # old-path')
+    doc=imported(original);pool=doc.imported_backends[0]
+    assert pool.proxy_options[0]==REDIRECT
+    assert backend_text(generate_imported(doc))==backend_text(original)
+    pool.proxy_options[0]=REDIRECT.replace('code 302','code 307')
+    changed=generate_imported(doc)
+    assert 'code 307 if { path / }' in changed and REDIRECT not in changed
+    assert changed.count('use_backend web if')==2 and 'http-request auth realm legacy' in changed
+    doc=imported(generate(doc,CAP));doc.imported_backends[0].proxy_options.pop(0)
+    removed=generate_imported(doc)
+    assert 'http-request redirect' not in backend_text(removed)
+    assert 'http-request auth realm legacy' in removed and 'server srv 127.0.0.1:8080 check inter 3s rise 2' in removed
+
+
+def test_old_draft_retains_previously_uneditable_redirect_then_allows_explicit_removal():
+    original=CONFIG.replace(' acl private src', ' '+REDIRECT+'\n acl private src')
+    old=imported(original).model_dump();pool=old['imported_backends'][0]
+    pool.pop('proxy_options_version')
+    pool['proxy_options']=[line for line in pool['proxy_options'] if line!=REDIRECT]
+    upgraded=Document.model_validate(old)
+    assert upgraded.imported_backends[0].proxy_options[1]==REDIRECT
+    assert backend_text(generate_imported(upgraded))==backend_text(original)
+    upgraded.imported_backends[0].proxy_options=[]
+    persisted=Document.model_validate(upgraded.model_dump())
+    assert not persisted.imported_backends[0].proxy_options
+    assert 'http-request redirect' not in backend_text(generate_imported(persisted))
+
+
+def test_old_empty_options_keep_raw_redirect_without_restoring_removed_headers():
+    original=CONFIG.replace(' acl private src', ' '+REDIRECT+'\n acl private src')
+    old=imported(original).model_dump();old['imported_backends'][0].pop('proxy_options_version')
+    old['imported_backends'][0]['proxy_options']=[]
+    doc=Document.model_validate(old)
+    assert doc.imported_backends[0].proxy_options==[REDIRECT]
+    output=backend_text(generate_imported(doc))
+    assert REDIRECT in output and 'http-request set-header X-Test' not in output
+
+
+def test_explicit_new_redirect_does_not_restore_an_old_redirect():
+    original=CONFIG.replace(' acl private src', ' '+REDIRECT+'\n acl private src')
+    old=imported(original).model_dump();old['imported_backends'][0].pop('proxy_options_version')
+    replacement=REDIRECT.replace('/unifidrive/login','/new-login')
+    old['imported_backends'][0]['proxy_options']=[replacement]
+    doc=Document.model_validate(old)
+    assert doc.imported_backends[0].proxy_options==[replacement]

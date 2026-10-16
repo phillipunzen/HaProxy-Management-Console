@@ -3,7 +3,7 @@ import difflib
 import shlex
 
 REQUEST_ACTIONS={'set-path','set-pathq','set-uri','set-query','set-method','replace-path','replace-pathq','replace-uri',
-                 'set-header','add-header','del-header','replace-header','replace-value','normalize-uri','set-var','unset-var'}
+                 'set-header','add-header','del-header','replace-header','replace-value','normalize-uri','set-var','unset-var','redirect'}
 RESPONSE_ACTIONS={'set-header','add-header','del-header','replace-header','replace-value','set-status','set-var','unset-var'}
 
 
@@ -26,12 +26,24 @@ def validate(values):
         try:tokens=shlex.split(line,comments=True)
         except ValueError as error:raise ValueError('Ungültige Anführungszeichen in einer Proxy-Option.') from error
         if tokens==['mode','http']:continue # Mode is already managed by the HTTP pool.
-        if not editable(tokens):raise ValueError('Proxy-Option nicht unterstützt: HTTP-Pfad-/Header-Regeln, option, no option oder Backend-Timeouts verwenden. Listener, Server, Authentifizierung und Routing separat bearbeiten.')
+        if not editable(tokens):raise ValueError('Proxy-Option nicht unterstützt: HTTP-Pfad-/Header-Regeln, http-request redirect, option, no option oder Backend-Timeouts verwenden. Listener, Server, Authentifizierung und Backend-Zuordnung separat bearbeiten.')
         if 'txn.mgmt_' in line or 'mgmt_basic_' in line or 'mgmt_access_' in line:
             raise ValueError('Interne Management-Namen sind in Proxy-Optionen reserviert.')
         result.append(line)
     if len(result)>100 or sum(map(len,result))>40000:raise ValueError('Maximal 100 Proxy-Optionen mit zusammen 40000 Zeichen.')
     return result
+
+
+def restore_legacy_redirects(current, original):
+    """Older drafts could not edit redirects; retain those previously raw lines."""
+    def redirect(line):return shlex.split(line,comments=True)[:2]==['http-request','redirect']
+    result=list(current)
+    if any(redirect(line) for line in result):return result
+    for index,line in enumerate(original):
+        if not redirect(line):continue
+        following=next((result.index(other) for other in original[index+1:] if other in result),len(result))
+        result.insert(following,line)
+    return validate(result)
 
 
 def option_lines(lines,section):

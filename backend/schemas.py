@@ -304,6 +304,8 @@ class ImportedServer(BackendServer):
 
 class ImportedBackend(BaseModel):
     proxy_options: list[str] | None = Field(default=None,max_length=100)
+    # Version 0 predates editable redirects, which remained in the raw baseline.
+    proxy_options_version: Literal[0,1] = 0
 
     @field_validator("proxy_options")
     @classmethod
@@ -453,13 +455,16 @@ class Document(BaseModel):
                 raise ValueError('IP-Filter-Profil oder eigene IP-Liste wählen, nicht beides gleichzeitig.')
             if item.access_paths and not item.access_profile:
                 raise ValueError('Geschützte Profil-Pfade benötigen ein zugewiesenes IP-Filter-Profil.')
-        if any(b.proxy_options is None for b in self.imported_backends) or any(s.tls_verify is None for b in self.imported_backends for s in b.servers):
+        if any(b.proxy_options is None or b.proxy_options_version==0 for b in self.imported_backends) or any(s.tls_verify is None for b in self.imported_backends for s in b.servers):
             from backend.haproxy_config import extract_backends
+            from backend.proxy_options import restore_legacy_redirects
             original,_=extract_backends(self.imported_config or '')
             policies={(b.name,s.name):s.tls_verify for b in original for s in b.servers}
             options={b.name:b.proxy_options for b in original}
             for b in self.imported_backends:
                 if b.proxy_options is None:b.proxy_options=options.get(b.name,[])
+                elif b.proxy_options_version==0:b.proxy_options=restore_legacy_redirects(b.proxy_options,options.get(b.name,[]))
+                b.proxy_options_version=1
             for b in self.imported_backends:
                 for s in b.servers:
                     if s.tls_verify is None:s.tls_verify=policies.get((b.name,s.name),True)

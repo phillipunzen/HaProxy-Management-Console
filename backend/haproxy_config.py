@@ -247,7 +247,7 @@ def extract_backends(config):
             warnings.append(f'{s.name}: Doppelte Servernamen bleiben im Texteditor.')
             servers=[sv for sv in servers if sv.name not in duplicates]
         if servers:
-            try:backends.append(ImportedBackend(name=s.name,mode=s.mode if s.mode in ('http','tcp') else 'unknown',balance=balance,servers=servers,proxy_options=[text for _,text in option_lines(lines,s)]))
+            try:backends.append(ImportedBackend(name=s.name,mode=s.mode if s.mode in ('http','tcp') else 'unknown',balance=balance,servers=servers,proxy_options=[text for _,text in option_lines(lines,s)],proxy_options_version=1))
             except ValueError:warnings.append(f'{s.name}: Komplexer Backend-Name bleibt im Texteditor.')
     return backends,warnings
 

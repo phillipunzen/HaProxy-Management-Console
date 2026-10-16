@@ -121,7 +121,17 @@ Damit wird `/login?token=abc` zum Zielpfad `/reset-password/login?token=abc`. Do
 
 **Forwarded-Header hinzufügen** ergänzt die üblichen Header, ohne vorhandene Werte derselben Direktive zu ersetzen oder doppelt anzulegen. Die Vorlage ermittelt Protokoll und Frontend-Port dynamisch (`ssl_fc` und `dst_port`); feste Werte wie im Beispiel sind ebenfalls möglich. **Pfad-Präfix als Beispiel** fügt die erste Beispielzeile hinzu. Bestehende Pfad-Umschreibungen werden dabei beibehalten. Einzelne Optionen durch Löschen ihrer Zeile entfernen, oder **Alle Optionen entfernen** verwenden.
 
-Unterstützt werden HTTP-Pfad-/URI-/Query-Umschreibungen, Request-/Response-/After-Response-Header, Variablen, `option`, `no option` und Backend-Timeouts. Reihenfolge, HAProxy-Ausdrücke, Anführungszeichen und Inline-Kommentare bleiben erhalten; leere Zeilen und reine Kommentarzeilen werden nicht als Optionen gespeichert. Optionen aus `defaults` bleiben geerbt. Zum Deaktivieren einer geerbten Option beispielsweise `no option forwardfor` verwenden. Listener, Serverdefinitionen, allgemeines Routing und Authentifizierung werden über ihre eigenen Einstellungen oder den vollständigen Konfigurationseditor bearbeitet.
+Unterstützt werden HTTP-Pfad-/URI-/Query-Umschreibungen, Request-/Response-/After-Response-Header, Variablen, Weiterleitungen mit `http-request redirect`, `option`, `no option` und Backend-Timeouts. Reihenfolge, HAProxy-Ausdrücke, Anführungszeichen und Inline-Kommentare bleiben erhalten; leere Zeilen und reine Kommentarzeilen werden nicht als Optionen gespeichert. Optionen aus `defaults` bleiben geerbt. Zum Deaktivieren einer geerbten Option beispielsweise `no option forwardfor` verwenden. Listener, Serverdefinitionen, allgemeines Routing und Authentifizierung werden über ihre eigenen Einstellungen oder den vollständigen Konfigurationseditor bearbeitet.
+
+Beispiel für eine Weiterleitung ausschließlich beim Aufruf des Wurzelpfads:
+
+```haproxy
+http-request redirect location /unifidrive/login code 302 if { path / }
+```
+
+Damit erhält `/` eine HTTP-302-Antwort mit dem Ziel `/unifidrive/login`; andere Pfade gehen weiter an den Backend-Server. Die Regel kann im Optionsfeld ergänzt, verändert und durch Löschen ihrer Zeile entfernt werden. Zentrale Basic Auth und IP-Filter werden weiterhin vor diesen Backend-Regeln ausgewertet. Bei gemeinsamen Pools gilt die Weiterleitung für alle zugeordneten Websites, sofern ihre Bedingung zutrifft. Für eine gesamte Domain-Weiterleitung ohne Backend steht weiterhin der Bereich **Regeln** zur Verfügung.
+
+Beim Update bleiben bisher nur im Originaltext enthaltene Backend-Redirects auch in älteren gespeicherten Import-Entwürfen erhalten. Nach dem Laden können diese Optionen ebenfalls ausdrücklich entfernt werden.
 
 Bei Imports werden unterstützte lokale Optionen aus dem ursprünglichen Backend übernommen; bereits gespeicherte Import-Entwürfe erhalten diese Informationen beim Laden. Ein ausdrücklich geleertes Optionsfeld entfernt sie. Nicht bearbeitete Konfigurationszeilen, zusätzliche Server-/Healthcheck-Parameter und bestehende Authentifizierungsregeln bleiben erhalten. Erneutes Einlesen erkennt gespeicherte Optionen wieder. Die endgültige Syntax prüft der HAProxy-Prozess des Zielservers vor dem Anwenden; erst **Im Entwurf speichern → Prüfen & anwenden** aktiviert die Änderung.
 

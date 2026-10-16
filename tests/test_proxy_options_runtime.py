@@ -14,7 +14,7 @@ from backend import basic_auth
 from backend.generator import generate
 from backend.haproxy_config import import_config
 from backend.schemas import Document
-from tests.test_proxy_options import OPTIONS
+from tests.test_proxy_options import OPTIONS,REDIRECT
 
 pytestmark=pytest.mark.skipif(os.environ.get('HAPROXY_BASIC_AUTH_LAB')!='1',reason='Requires isolated HAProxy lab')
 BINARY=os.environ.get('HAPROXY_BASIC_AUTH_BINARY','/usr/sbin/haproxy')
@@ -70,8 +70,8 @@ backend web
         doc=Document.model_validate(import_config(original,'a'*64)['document'])
         if scenario!='legacy':doc.imported_routes[0].basic_auth_group=1
         doc.imported_backends[0].proxy_options=OPTIONS if scenario!='legacy' else [line.replace('set-header Host %[req.hdr(host)]','set-header Host backend.internal') for line in OPTIONS]
-    def request(host='app.example.com',auth=('member','test-password')):
-        return httpx.get(f'http://127.0.0.1:{listen}/login?token=test',headers={'Host':host},auth=auth,timeout=2,trust_env=False)
+    def request(host='app.example.com',auth=('member','test-password'),path='/login?token=test'):
+        return httpx.get(f'http://127.0.0.1:{listen}{path}',headers={'Host':host},auth=auth,timeout=2,trust_env=False)
     process=None;container=None
     def stop():
         nonlocal process,container
@@ -123,4 +123,17 @@ backend web
         result=request().json();assert result['path']=='/login?token=test'
         assert not any(k.lower().startswith('x-forwarded-') for k in result['headers'])
         if scenario!='pool':assert request(auth=None).status_code==401
+        # Exact user rule: only root redirects; login and unrelated paths still reach the app.
+        owner.proxy_options=[REDIRECT];config=launch(again)
+        response=request(path='/');assert response.status_code==302 and response.headers['location']=='/unifidrive/login'
+        assert request(path='/unifidrive/login').json()['path']=='/unifidrive/login'
+        if scenario!='pool':
+            assert request(path='/',auth=None).status_code==401
+            assert request(path='/',auth=('member','wrong-password')).status_code==401
+        assert request('other.example.com',auth=None,path='/').status_code==(200 if scenario=='host' else 302)
+        restored=Document.model_validate(import_config(config,'c'*64)['document'])
+        owner=restored.hosts[0] if scenario=='host' else restored.imported_backends[0] if scenario in ('imported','legacy') else restored.backends[0]
+        assert owner.proxy_options==[REDIRECT]
+        owner.proxy_options=[];launch(restored)
+        assert request(path='/').status_code==200 and request(path='/').json()['path']=='/'
     finally:stop();server.shutdown();server.server_close()
