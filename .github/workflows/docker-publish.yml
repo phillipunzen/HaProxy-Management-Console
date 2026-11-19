@@ -87,7 +87,9 @@ jobs:
         env:
           HAPROXY_BASIC_AUTH_LAB: '1'
           HAPROXY_BASIC_AUTH_BINARY: /usr/sbin/haproxy
-        run: python -m pytest tests -q -k runtime
+        # The agent hands certificate files to the HAProxy user (chown), which needs root,
+        # exactly as on a real HAProxy host. GitHub runners are unprivileged by default.
+        run: sudo -E env "PATH=$PATH" python -m pytest tests -q -k runtime -p no:cacheprovider
 
   frontend:
     name: Frontend checks
