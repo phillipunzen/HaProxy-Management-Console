@@ -1,6 +1,8 @@
 [tool.ruff]
 line-length = 120
-target-version = "py313"
+# The agent runs on the HAProxy host's system Python (Debian 12: 3.11, Ubuntu 22.04: 3.10);
+# keep syntax compatible with it even though the image uses a newer Python.
+target-version = "py310"
 extend-exclude = ["frontend", ".venv", "lab"]
 
 [tool.ruff.format]

@@ -43,7 +43,7 @@ python3 - "$haproxy_install_temp/package.zip" "$haproxy_install_dir" <<'PY'
 import sys
 from pathlib import Path
 from zipfile import ZipFile
-allowed = ['requirements.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/proxy_options.py', 'backend/backend_delete.py', 'backend/access_control.py', 'backend/managed_rules.py', 'backend/haproxy_config.py', 'backend/tls_bindings.py',
+allowed = ['requirements-agent.txt', 'backend/__init__.py', 'backend/schemas.py', 'backend/proxy_options.py', 'backend/backend_delete.py', 'backend/access_control.py', 'backend/managed_rules.py', 'backend/haproxy_config.py', 'backend/tls_bindings.py',
            'agent/__init__.py', 'agent/main.py', 'agent/certificates.py', 'agent/challenge.py', 'agent/tls_bindings.py', 'agent/haproxy-control-webroot.service', 'agent/config_bundle.py', 'agent/setup_checks.py', 'agent/config.example.json']
 with ZipFile(sys.argv[1]) as archive:
     for name in allowed:
@@ -53,7 +53,7 @@ with ZipFile(sys.argv[1]) as archive:
         target.chmod(0o644)
 PY
 python3 -m venv "$haproxy_install_dir/.venv"
-"$haproxy_install_dir/.venv/bin/pip" install -r "$haproxy_install_dir/requirements.txt"
+"$haproxy_install_dir/.venv/bin/pip" install --require-hashes -r "$haproxy_install_dir/requirements-agent.txt"
 if [[ ${HAPROXY_AGENT_UPDATE_ONLY:-0} == 1 ]]; then
   # Upgrade the sandbox of existing units; all profile paths (including imported
   # LEGO stores) stay writable, everything else becomes read-only.

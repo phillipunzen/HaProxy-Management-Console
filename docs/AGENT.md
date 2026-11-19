@@ -188,7 +188,7 @@ Für HAProxy-Hosts außerhalb des LANs kann das optionale Compose-Profil **agent
 
 Voraussetzungen: Linux mit systemd, Python 3.11+, bereits installiertes HAProxy; für Docker außerdem die Docker CLI auf dem Host. Die folgenden Paketbefehle gelten für Debian/Ubuntu. HAProxy 3.0 und 3.2 wurden getestet.
 
-Das Docker-ZIP enthält bereits `agent/`, `backend/schemas.py`, `requirements.txt` und diese Anleitung. Auf einem neuen HAProxy-Host das Paket nach `/opt` entpacken; dadurch entsteht `/opt/haproxy-management`. Auf einem Host mit vorhandenem Projekt dessen Verzeichnis verwenden. Alternativ aus GitHub beziehen:
+Das Docker-ZIP enthält bereits `agent/`, `backend/schemas.py`, `requirements-agent.txt` und diese Anleitung. Auf einem neuen HAProxy-Host das Paket nach `/opt` entpacken; dadurch entsteht `/opt/haproxy-management`. Auf einem Host mit vorhandenem Projekt dessen Verzeichnis verwenden. Alternativ aus GitHub beziehen:
 
 ```bash
 sudo apt-get update
@@ -196,7 +196,7 @@ sudo apt-get install -y git python3-venv certbot python3-certbot-dns-cloudflare
 sudo git clone https://github.com/phillipunzen/HaProxy-Management-Console.git /opt/haproxy-management
 cd /opt/haproxy-management
 sudo python3 -m venv .venv
-sudo .venv/bin/pip install -r requirements.txt
+sudo .venv/bin/pip install --require-hashes -r requirements-agent.txt
 sudo install -d -m 700 /etc/haproxy-control /var/lib/haproxy-control
 ```
 

@@ -1,0 +1,7 @@
+# Agent on the HAProxy hosts. It runs on the host's system Python (Ubuntu 22.04: 3.10,
+# Debian 12: 3.11), so this lock is compiled with Python 3.10 and keeps only what the
+# agent imports. Regenerate inside python:3.10-slim:
+#   pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements-agent.txt requirements-agent.in
+fastapi==0.162.0
+uvicorn==0.54.0
+cryptography==50.0.2
