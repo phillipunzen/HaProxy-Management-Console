@@ -4,7 +4,7 @@ Server lassen sich mit frei wählbaren Tags und einem Standort organisieren und 
 
 Für zentral verwaltete Website-Zugänge unter **Basic Auth** Benutzer und Gruppen anlegen, unter **Proxy Hosts → Website-Zugang** zuordnen und die Konfiguration auf jeder betroffenen Instanz prüfen und anwenden. Die [Basic-Auth-Anleitung](https://github.com/phillipunzen/HaProxy-Management-Console/blob/main/docs/BASIC_AUTH.md) beschreibt Passwortwechsel, Aktivierung und importierte Konfigurationen. Keine zusätzlichen ENV-Variablen erforderlich. Die Anleitung liegt im Docker-ZIP unter `docs/BASIC_AUTH.md`.
 
-Dieses Paket enthält `docker-compose.yml`, `.env.example`, diese Anleitung sowie die Agent-Dateien und `docs/AGENT.md` zum Verbinden nativer und Docker-basierter HAProxy-Server. Das Image enthält die fertige Webanwendung für Linux/amd64. Eine externe MariaDB und Docker mit Compose werden benötigt. Die Datenbank und der Datenbankbenutzer müssen vor dem ersten Start existieren; die Anwendung erstellt ihre Tabellen selbst.
+Dieses Paket enthält `docker-compose.yml`, `.env.example`, diese Anleitung sowie die Agent-Dateien und `docs/AGENT.md` zum Verbinden nativer und Docker-basierter HAProxy-Server. Das Image enthält die fertige Webanwendung für Linux/amd64 und Linux/arm64. Eine externe MariaDB und Docker mit Compose werden benötigt. Die Datenbank und der Datenbankbenutzer müssen vor dem ersten Start existieren; die Anwendung erstellt ihre Tabellen selbst.
 
 ## Start
 
@@ -55,6 +55,7 @@ Die Oberfläche unter `APP_ORIGIN` öffnen und mit `ADMIN_USERNAME` / `ADMIN_PAS
 | `AGENT_DOWNLOAD_PORT` | Host-Port für Installer und Agent-ZIP, Standard `8101`; Container-Port `8001`. Nur mit Compose-Profil `agent-downloads` aktiv. |
 | `AGENT_DOWNLOAD_ORIGIN` | Optional separate Basisadresse für Installations-/Update-Downloads, z. B. `https://agent-downloads.example.com`; leer verwendet `APP_ORIGIN`. |
 | `APP_ORIGIN` | Vollständiger Ursprung der Browser-Adresse einschließlich Schema und Port, ohne Pfad oder abschließenden Schrägstrich. |
+| `FORWARDED_ALLOW_IPS` | IP-Adresse oder Netz (CIDR) des Reverse Proxys vor der WebUI, z. B. `172.18.0.1` oder `172.18.0.0/16`. Nur von dort werden `X-Forwarded-For`/`X-Forwarded-Proto` übernommen, damit Anmeldebegrenzung und Aktivitätsprotokoll die echte Client-IP sehen. Standard `127.0.0.1` vertraut keinem Proxy außerhalb des Containers. Ohne diese Angabe teilen sich hinter einem Proxy alle Benutzer einen Zähler für Fehlversuche. |
 | `DB_HOST` | MariaDB-Hostname/IP, vom Container aus erreichbar. `localhost` bezeichnet den Container selbst. |
 | `DB_PORT` | MariaDB-Port, standardmäßig `3306`. |
 | `DB_NAME` | Name der bereits angelegten MariaDB-Datenbank. |

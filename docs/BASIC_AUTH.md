@@ -6,8 +6,8 @@ Unter **Basic Auth** verwaltest du Website-Benutzer und Benutzergruppen zentral 
 
 1. Als Administrator **Basic Auth → Gruppen → Gruppe hinzufügen** öffnen, z. B. „Intern“. Der **Realm** ist der Text im Browser-Anmeldedialog. Er erlaubt Buchstaben A–Z, Zahlen, Leerzeichen und `. : @ / _ -`.
 2. Unter **Benutzer → Benutzer hinzufügen** Benutzername und Passwort vergeben (ohne Mindestlänge; auch kurze Passwörter sind möglich) und die gewünschte Gruppe auswählen. Benutzer ohne Gruppe erhalten keinen Site-Zugriff.
-3. Die HAProxy-Instanz unter **Proxy Hosts** auswählen und die Website bearbeiten. Unter **Website-Zugang** die Gruppe auswählen und **Im Entwurf speichern** drücken. Bei importierten Konfigurationen unter **Übernommene Domain-Zuordnungen** den Einstellungsbutton neben der gewünschten Domain anklicken. Der Dialog **Domain-Zuordnung bearbeiten** zeigt den Zielserver und die Auswahl **Website-Zugang**; dort die Gruppe mit den gewünschten Benutzern zuweisen. Die aktuelle Zuordnung steht auch in der Spalte **Website-Zugang**.
-4. **Konfiguration erzeugen** wählen. Im Konfigurationseditor vergleichen und **Prüfen & anwenden** ausführen. Der Agent prüft die Konfiguration mit dem HAProxy des Zielhosts und führt einen Reload aus.
+3. Die HAProxy-Instanz unter **Proxy Hosts** auswählen und die Website bearbeiten. Unter **Website-Zugang** die Gruppe auswählen und **Speichern** drücken. Bei importierten Konfigurationen unter **Übernommene Domain-Zuordnungen** den Einstellungsbutton neben der gewünschten Domain anklicken. Der Dialog **Domain-Zuordnung bearbeiten** zeigt den Zielserver und die Auswahl **Website-Zugang**; dort die Gruppe mit den gewünschten Benutzern zuweisen. Die aktuelle Zuordnung steht auch in der Spalte **Website-Zugang**.
+4. **Prüfen & anwenden** in der Titelleiste wählen. Im Dialog die Unterschiede prüfen und **Anwenden & neu laden** ausführen. Der Agent prüft die Konfiguration mit dem HAProxy des Zielhosts und führt einen Reload aus.
 
 Der Schutz gilt für die ausgewählte Website bzw. ihren Pfad. Andere Domains an einem gemeinsamen Backend behalten ihren bisherigen Website-Zugang. TCP-Pools unterstützen keine HTTP-Basic-Authentifizierung. HTTP-Challenges für Let's Encrypt bleiben bei vom grafischen Editor erzeugten Hosts erreichbar; HTTPS-Weiterleitungen erfolgen vor der Anmeldung. Für importierte Konfigurationen bleiben bestehende Challenge- und Redirect-Regeln maßgeblich.
 
@@ -15,7 +15,7 @@ Der Schutz gilt für die ausgewählte Website bzw. ihren Pfad. Andere Domains an
 
 Passwort, Gruppenmitgliedschaften, Aktivierung und Realm lassen sich zentral ändern. Beim Bearbeiten eines Benutzers bedeutet ein **leeres Passwortfeld**, dass das bisherige Passwort erhalten bleibt. Deaktivierte oder gelöschte Benutzer erhalten nach Aktivierung der neuen HAProxy-Konfiguration keinen Zugriff mehr.
 
-**Die Änderungen wirken erst nach Anwendung auf den betreffenden HAProxy-Instanzen.** Unter Basic Auth zeigt die Tabelle **Änderungen ausstehend**. Für jede betroffene Instanz **Konfiguration erzeugen → Prüfen & anwenden** ausführen. Die Anwendung lädt keine Dienste automatisch nach einer Benutzeränderung neu. Ältere erzeugte Entwürfe mit inzwischen veralteten Zugangsdaten werden beim Anwenden abgelehnt; dann erneut erzeugen.
+**Die Änderungen wirken erst nach Anwendung auf den betreffenden HAProxy-Instanzen.** Unter Basic Auth zeigt die Tabelle **Änderungen ausstehend**. Für jede betroffene Instanz **Prüfen & anwenden** (Titelleiste) ausführen. Die Anwendung lädt keine Dienste automatisch nach einer Benutzeränderung neu. Ältere erzeugte Entwürfe mit inzwischen veralteten Zugangsdaten werden beim Anwenden abgelehnt; dann erneut erzeugen.
 
 Eine Gruppe ohne aktive Benutzer sperrt ihre zugewiesenen Websites weiterhin: Jede Anfrage erhält HTTP 401. Sie wird nicht automatisch öffentlich. Eine Gruppe kann erst gelöscht werden, wenn alle Website-Zuordnungen entfernt wurden, einschließlich deaktivierter Hosts. Zum Freigeben einer Website im Entwurf **Öffentlich · keine Basic Auth** auswählen und die Konfiguration anwenden.
 
@@ -36,7 +36,7 @@ Vorhandene `userlist`-Abschnitte und eigene Authentifizierungsregeln bleiben bei
 1. Unter **Proxy Hosts → Übernommene Domain-Zuordnungen** die betroffene Domain bearbeiten.
 2. Unter **Website-Zugang** die zentrale Gruppe auswählen. Der Dialog zeigt die vorhandenen Backend-Regeln an.
 3. **Vorhandene Backend-Anmeldung für diese Domain ersetzen** bestätigen und den Entwurf speichern.
-4. **Konfiguration erzeugen → Prüfen & anwenden** ausführen.
+4. **Prüfen & anwenden** (Titelleiste) ausführen.
 
 Nach gespeicherter Umstellung blendet der Domain-Dialog den Hinweis auf die alte Backend-Anmeldung aus. Die bestätigte Zuordnung bleibt erhalten. Beim Ändern von Domain, Frontend oder Backend ist für den neuen Bezug wieder eine Bestätigung nötig.
 

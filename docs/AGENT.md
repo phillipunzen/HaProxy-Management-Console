@@ -463,6 +463,18 @@ Zertifikate werden auf dem jeweiligen Agent-Host ausgestellt und gespeichert. Es
 
 Referenzen: [HAProxy Runtime API](https://www.haproxy.com/documentation/haproxy-runtime-api/), [offizieller Docker-Entrypoint für HAProxy 3.2](https://github.com/docker-library/haproxy/blob/master/3.2/docker-entrypoint.sh), [Certbot-Benutzerhandbuch](https://eff-certbot.readthedocs.io/en/stable/using.html), [Cloudflare-Plugin](https://certbot-dns-cloudflare.readthedocs.io/en/stable/).
 
+## Agent-Token erneuern
+
+Administratoren erzeugen unter **Server → Token erneuern** (Schlüsselsymbol) ein neues zufälliges Agent-Token. Die WebUI überträgt es mit dem bisherigen Token an den Agenten, der es in `/etc/haproxy-control/agent.json` speichert und sofort verwendet; das alte Token ist danach ungültig. Geht die Antwort unterwegs verloren, prüft die WebUI das neue Token und übernimmt es nur, wenn der Agent es bereits akzeptiert. Ältere Agenten zuerst über **Agent aktualisieren** auf den aktuellen Stand bringen.
+
+## Absicherung des Agent-Dienstes
+
+Der Agent läuft als root, weil er `docker.sock`, `systemctl` und Dateien des HAProxy-Benutzers verwendet. Die systemd-Unit begrenzt ihn trotzdem stark: `NoNewPrivileges`, `ProtectSystem=strict` (das gesamte Dateisystem ist schreibgeschützt bis auf die Konfigurations-, Socket-, Zertifikats-, LEGO- und Zustandsverzeichnisse der Profile), kein Zugriff auf Kernel-Parameter, -Module und -Logs, eingeschränkte Systemaufrufe, Adressfamilien und Capabilities. Installer und **Agent aktualisieren** schreiben diese Einstellungen automatisch (bei Updates als `haproxy-control-agent.service.d/50-hardening.conf`). Bei manueller Installation weitere Profilverzeichnisse unter `ReadWritePaths=` ergänzen.
+
+## Direktiven, die Programme starten
+
+`program`-Abschnitte, `lua-load`/`lua-load-per-thread`/`lua-prepend-path`, `external-check`/`option external-check` sowie `insecure-fork-wanted`/`insecure-setuid-wanted` können Code auf dem HAProxy-Server ausführen (`lua-load` bereits beim Prüfen mit `haproxy -c`). Nur Administratoren dürfen solche Zeilen neu hinzufügen; Operatoren erhalten beim Prüfen bzw. Anwenden eine Fehlermeldung. Bereits in der aktiven Konfiguration vorhandene Zeilen bleiben für Operatoren unverändert nutzbar.
+
 ## Bestehende Dateien und Agent-Updates
 
 Die WebUI bietet unter **Server → Agent aktualisieren** einen checksum-geprüften Aktualisierungsbefehl für bestehende systemd-Agenten. Tokens und Profile bleiben erhalten. Für den Config-Import müssen `agent/config_bundle.py` und `backend/haproxy_config.py` neben den bisherigen Dateien vorhanden sein.

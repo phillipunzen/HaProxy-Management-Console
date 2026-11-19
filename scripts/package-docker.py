@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Package Docker deployment and agent installation files without credentials."""
+
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import sys
+
 root = Path(__file__).resolve().parent.parent
-output = root / 'downloads' / 'haproxy-management-docker.zip'
-output.parent.mkdir(exist_ok=True)
+# Built during the Docker build, the test run and for GitHub releases; not versioned.
+output = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'downloads' / 'haproxy-management-docker.zip'
+output.parent.mkdir(parents=True, exist_ok=True)
 files = {
     'docker-compose.yml': root / 'docker-compose.yml',
     '.env.example': root / '.env.example',
@@ -33,8 +37,18 @@ files = {
     'backend/basic_auth.py': root / 'backend' / 'basic_auth.py',
     'backend/tls_bindings.py': root / 'backend' / 'tls_bindings.py',
 }
-for name in ('__init__.py', 'main.py', 'certificates.py', 'challenge.py', 'tls_bindings.py', 'config_bundle.py', 'setup_checks.py', 'config.example.json',
-             'haproxy-control-agent.service', 'haproxy-control-webroot.service'):
+for name in (
+    '__init__.py',
+    'main.py',
+    'certificates.py',
+    'challenge.py',
+    'tls_bindings.py',
+    'config_bundle.py',
+    'setup_checks.py',
+    'config.example.json',
+    'haproxy-control-agent.service',
+    'haproxy-control-webroot.service',
+):
     files[f'agent/{name}'] = root / 'agent' / name
 with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
     for name, source in files.items():

@@ -1,0 +1,22 @@
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = ["frontend", ".venv", "lab"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+# pyflakes, syntax/statement errors and a few bug-prone patterns
+select = ["E4", "E7", "E9", "F", "B006", "B008", "B904", "W605"]
+ignore = [
+    "B008",  # FastAPI dependencies are declared as Depends() defaults
+    "B904",  # many HTTPException re-raises intentionally hide internal exceptions
+]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest fixtures are imported into test modules and then used as parameters
+"tests/*" = ["F811", "F401", "E402", "E731", "E741"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

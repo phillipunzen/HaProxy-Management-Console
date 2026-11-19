@@ -4,9 +4,9 @@ Deutsche Management-Oberfläche für mehrere HAProxy-Server mit nativer Installa
 
 ## Docker-Image starten
 
-Image: `ghcr.io/phillipunzen/haproxy-management-console:latest` (Linux/amd64).
+Image: `ghcr.io/phillipunzen/haproxy-management-console:latest` (Linux/amd64 und Linux/arm64).
 
-Eine fertige `docker-compose.yml` mit expliziten ENV-Variablen liegt im Repository. Das [Docker-Paket als ZIP herunterladen](https://github.com/phillipunzen/HaProxy-Management-Console/raw/refs/heads/main/downloads/haproxy-management-docker.zip): enthalten sind Compose-Datei, `.env.example`, Startanleitung und Agent-Dateien mit Anleitung für Nativ und Docker. Die [Docker-Anleitung](docs/DOCKER.md) beschreibt jede Variable und die Erzeugung der Schlüssel. Das ZIP wird mit `python3 scripts/package-docker.py` unter `downloads/haproxy-management-docker.zip` neu erstellt. Im vollständigen [Repository-Archiv](https://github.com/phillipunzen/HaProxy-Management-Console/archive/refs/heads/main.zip) sind diese Dateien ebenfalls enthalten. Für die fertige Compose-Datei immer `docker compose -f docker-compose.yml …` verwenden; `compose.yaml` ist für den lokalen Build vorgesehen.
+Eine fertige `docker-compose.yml` mit expliziten ENV-Variablen liegt im Repository. Das [Docker-Paket als ZIP herunterladen](https://github.com/phillipunzen/HaProxy-Management-Console/releases/latest/download/haproxy-management-docker.zip): enthalten sind Compose-Datei, `.env.example`, Startanleitung und Agent-Dateien mit Anleitung für Nativ und Docker. Die [Docker-Anleitung](docs/DOCKER.md) beschreibt jede Variable und die Erzeugung der Schlüssel. Das ZIP hängt an jedem GitHub-Release (`v*`-Tag) und wird außerdem beim Docker-Build sowie lokal mit `python3 scripts/package-docker.py` unter `downloads/haproxy-management-docker.zip` erzeugt; es liegt nicht mehr im Repository. Im vollständigen [Repository-Archiv](https://github.com/phillipunzen/HaProxy-Management-Console/archive/refs/heads/main.zip) sind diese Dateien ebenfalls enthalten. Immer `docker compose -f docker-compose.yml …` verwenden; dieselbe Datei startet das veröffentlichte Image oder mit `--build` einen lokalen Build.
 
 ```bash
 git clone https://github.com/phillipunzen/HaProxy-Management-Console.git
@@ -45,7 +45,7 @@ Die Oberfläche ist standardmäßig unter `http://<server-ip>:8100` erreichbar. 
 
 Falls das GHCR-Paket privat ist, vor dem Pull mit deinem GitHub-Benutzernamen und einem Token mit `read:packages` bei `ghcr.io` anmelden (`docker login ghcr.io -u <github-user> --password-stdin`). Das Token über stdin zuführen und nicht in Repository-Dateien speichern.
 
-Alternativ lokal bauen: `docker compose up -d --build`. Logs: `docker compose -f compose.registry.yaml logs --tail 100 app`. Der Container startet nach Docker-/Host-Neustarts automatisch. Die Daten bleiben in der externen MariaDB.
+Alternativ lokal bauen: `docker compose -f docker-compose.yml up -d --build` (nur im Repository-Checkout). Logs: `docker compose -f docker-compose.yml logs --tail 100 app`. Der Container startet nach Docker-/Host-Neustarts automatisch. Die Daten bleiben in der externen MariaDB.
 
 ## Separater Agent-Download-Port
 
@@ -55,10 +55,11 @@ Mit dem optionalen Compose-Profil **agent-downloads** lassen sich ausschließlic
 
 GitHub Actions führt die Unit-Tests aus, baut Frontend und Backend im mehrstufigen Docker-Build und veröffentlicht das Image in der GitHub Container Registry. Pushes auf `main` erzeugen `latest` und einen Commit-Tag (`sha-…`); Versions-Tags wie `v0.1.0` erzeugen zusätzlich `0.1.0` und `0.1`. Pull Requests prüfen den Build ohne Veröffentlichung. Der Workflow benötigt keine eigenen Registry-Secrets: er verwendet das temporäre `GITHUB_TOKEN` mit `packages:write`.
 
-Für Updates `docker compose -f compose.registry.yaml pull` und danach `docker compose -f compose.registry.yaml up -d` ausführen. Über `IMAGE_TAG` in `.env` lässt sich eine bestimmte Version bzw. ein Commit-Tag verwenden. Die Paket-Sichtbarkeit lässt sich in den GitHub-Paketeinstellungen ändern. [GitHub-Dokumentation zur Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+Für Updates `docker compose -f docker-compose.yml pull` und danach `docker compose -f docker-compose.yml up -d` ausführen. `docker-compose.yml` ist die einzige Compose-Datei; die früheren `compose.yaml` und `compose.registry.yaml` entfallen. Über `IMAGE_TAG` in `.env` lässt sich eine bestimmte Version bzw. ein Commit-Tag verwenden. Die Paket-Sichtbarkeit lässt sich in den GitHub-Paketeinstellungen ändern. [GitHub-Dokumentation zur Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
 ## Funktionen
 
+- Arbeitsoberfläche im IDE-Stil (angelehnt an JetBrains und Microsoft Office): Titelleiste mit Infrastruktur- und Server-Umschalter, gruppierte und einklappbare Navigation, Befehlsleiste je Seite, Statusleiste mit Serverstatus, Version und Farbschema (System, Hell, Dunkel).
 - Login mit Argon2id-Passwörtern, serverseitigen Sitzungen, HttpOnly-Cookie, CSRF-Prüfung und Anmeldebegrenzung; Passwortwechsel invalidiert sämtliche Sitzungen.
 - Benutzerrollen: Admin (alle Rechte), Operator (Konfiguration, Zertifikate, Reload/Start/Restart), Viewer (Statistiken und Zertifikatsmetadaten).
 - Zentrale Basic-Auth-Benutzer und Gruppen für einzelne HTTP-/HTTPS-Websites, auch bei importierten Domain-Routen und gemeinsamen Backends. Passwörter ab 10 Zeichen, gesalzene Hashes, Benutzer deaktivieren und ausstehende Änderungen pro Instanz aktivieren. [Einrichtung und Aktivierung](docs/BASIC_AUTH.md).
@@ -87,7 +88,7 @@ Voraussetzungen: Docker mit Compose und eine erreichbare MariaDB (11.x getestet)
 
 1. `.env.example` nach `.env` kopieren, Zugangsdaten und `APP_ORIGIN` setzen. Schlüssel und Startpasswort mit dem Befehl unter [Schlüssel und Startpasswort erzeugen](#schlüssel-und-startpasswort-erzeugen) erstellen und die Platzhalter ersetzen. `.env` auf Modus 0600 setzen.
 2. Datenbank vorab erstellen. Der Benutzer benötigt Zugriff auf die Anwendungstabellen sowie bei Erststart `CREATE`/`INDEX`/`REFERENCES`. Die Anwendung führt keine Drops oder Änderungen an fremden Tabellen aus. Eine eigene Datenbank wird empfohlen.
-3. `docker compose -f compose.registry.yaml up -d` für das veröffentlichte Image oder `docker compose up -d --build` für einen lokalen Build.
+3. `docker compose -f docker-compose.yml up -d` für das veröffentlichte Image oder `docker compose -f docker-compose.yml up -d --build` für einen lokalen Build.
 4. Mit dem Bootstrap-Benutzer anmelden und Passwort ändern. Bootstrap-Werte erzeugen einen Benutzer nur, wenn noch kein Benutzer existiert.
 5. Agenten auf den HAProxy-Hosts nach [Agent-Anleitung](docs/AGENT.md) einrichten und unter **Server** verbinden.
 
@@ -123,13 +124,15 @@ Die [vollständige Schritt-für-Schritt-Anleitung](docs/AGENT.md) enthält Insta
 
 ## Konfiguration bearbeiten
 
-Bei bestehenden HAProxy-Servern **Proxy Hosts → Vorhandene Config einlesen** wählen. Der aktuelle Agent liest die geladenen Konfigurationsdateien und referenzierten Host-Maps. Die Vorschau unterscheidet HTTP-Reverse-Proxys, TCP-Pools, Prometheus und HAProxy-Stats. **Als grafischen Entwurf übernehmen** aktiviert noch keine Änderung am Dienst.
+**Ablauf:** Hosts, Regeln, Frontends oder Backends bearbeiten und **Speichern**. Gespeichertes ist noch nicht live: Die Titelleiste zeigt die Zahl der **ausstehenden Änderungen**. Ein Klick listet sie auf (neu, geändert, entfernt), einzelne oder alle lassen sich dort verwerfen. **Prüfen & anwenden** öffnet immer denselben Dialog: Unterschiede zur laufenden Konfiguration (farbig, mit Zeilennummern), Ergebnis von `haproxy -c`, Versionsnotiz (aus den Änderungen vorbelegt) und **Anwenden & neu laden**. Die laufende Konfiguration wird vorher als Version gesichert. Im Konfigurationseditor führt **Prüfen & anwenden …** über denselben Dialog.
 
-Domain-Zuordnungen aus einfachen Host-Maps und Host-ACLs sowie statische Backend-Ziele werden grafisch bearbeitbar. Globale Einstellungen, Header, Redirects, Authentifizierung und Sonderregeln bleiben erhalten. **Konfiguration erzeugen** setzt die Änderungen in den eingelesenen Text ein. Im Editor vergleichen, prüfen und anwenden. Bei mehreren geladenen Dateien werden die Abschnitte beim Anwenden in der Hauptdatei zusammengeführt; alle Originaldateien werden gesichert. Die [Import-Anleitung](docs/IMPORT.md) beschreibt Voraussetzungen, Grenzen und Wiederherstellung.
+Bei bestehenden HAProxy-Servern **Konfiguration → Config einlesen** wählen (bei leerer Host-Liste auch direkt unter Proxy Hosts). Der aktuelle Agent liest die geladenen Konfigurationsdateien und referenzierten Host-Maps. Die Vorschau unterscheidet HTTP-Reverse-Proxys, TCP-Pools, Prometheus und HAProxy-Stats. **Als grafischen Entwurf übernehmen** aktiviert noch keine Änderung am Dienst.
+
+Domain-Zuordnungen aus einfachen Host-Maps und Host-ACLs sowie statische Backend-Ziele werden grafisch bearbeitbar. Globale Einstellungen, Header, Redirects, Authentifizierung und Sonderregeln bleiben erhalten. Beim Anwenden werden die Änderungen in den eingelesenen Text eingesetzt; wer den Text vorher sehen oder ergänzen möchte, nutzt **Konfiguration → Ausstehende Änderungen in Editor laden**. Bei mehreren geladenen Dateien werden die Abschnitte beim Anwenden in der Hauptdatei zusammengeführt; alle Originaldateien werden gesichert. Die [Import-Anleitung](docs/IMPORT.md) beschreibt Voraussetzungen, Grenzen und Wiederherstellung.
 
 Fehlt die Datei-Import-Funktion, bietet der Importdialog direkt einen **Update-Befehl** und das erneute Einlesen an. Andere Fehler zeigen die konkrete Ursache statt eines pauschalen Update-Hinweises. Einen bestehenden Agenten alternativ unter **Server → Agent aktualisieren** aktualisieren und den erzeugten Befehl auf dem HAProxy-Host ausführen. Bei eigener Dateistruktur gegebenenfalls `config_sources` und `map_dirs` im Agent-Profil setzen.
 
-Für eine neue Konfiguration ohne Import erzeugt der grafische Editor die vollständige Datei aus Hosts, Regeln und Listenern. Manuelle Einstellungen werden in diesem Modus nicht übernommen; ein Dialog weist darauf hin. HTTPS erst einschalten, wenn im Zertifikatsverzeichnis ein gültiges Produktionszertifikat liegt. Der HAProxy-Check blockiert fehlerhafte Konfigurationen.
+Für eine neue Konfiguration ohne Import erzeugt der grafische Editor die vollständige Datei aus Hosts, Regeln und Listenern. Manuelle Einstellungen werden in diesem Modus nicht übernommen; der Anwenden-Dialog zeigt das als entfernte Zeilen. HTTPS erst einschalten, wenn im Zertifikatsverzeichnis ein gültiges Produktionszertifikat liegt. Der HAProxy-Check blockiert fehlerhafte Konfigurationen.
 
 Rollback: vorherige Version in der Historie **Als Entwurf laden**, prüfen und anwenden. Dadurch werden auch zwischenzeitliche externe Änderungen erkannt. Bei unbekanntem Status zuerst aktive Konfiguration und Dienst prüfen; nicht blind erneut anwenden.
 
@@ -147,14 +150,25 @@ MariaDB enthält Benutzer, verschlüsselte Agent-Tokens, Sitzungen, Instanzentw�
 
 Backend: Python/FastAPI/SQLAlchemy/PyMySQL. Frontend: React/TypeScript/Vite. Ein App-Worker, weil die Anmeldebegrenzung im Prozess geführt wird; Sitzungen und Datenspeicherung liegen in MariaDB. Eine horizontale Skalierung benötigt eine zentrale Anmeldebegrenzung und einen einzelnen Collector.
 
+Code-Aufteilung: `backend/main.py` (App, Middleware, Start), `backend/core.py` (Anmeldung, Rollen, Agent-Client), `backend/routes/*.py` (API nach Bereich), `backend/migrations.py` + `migrations/` (Alembic). Frontend: `frontend/src/main.tsx` (App-Rahmen), `src/views/` (Seiten), `src/forms/`, `src/components/`.
+
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --require-hashes -r requirements.txt -r requirements-dev.txt
 npm ci --prefix frontend
 npm run build --prefix frontend
-.venv/bin/python -m pytest tests/test_generator.py tests/test_agent.py tests/test_certificates.py tests/test_auth.py tests/test_agent_setup.py tests/test_agent_installer.py tests/test_config_import.py tests/test_metrics.py -q
+.venv/bin/python -m pytest            # alle Tests; Labortests überspringen sich ohne Opt-in
+.venv/bin/ruff check backend agent tests scripts migrations
+.venv/bin/ruff format backend agent tests scripts migrations
+npm run typecheck --prefix frontend && npm run format:check --prefix frontend && npm test --prefix frontend
 .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8100
 ```
+
+**Abhängigkeiten:** direkte Pakete in `requirements.in` bzw. `requirements-dev.in` pflegen und mit `pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements.txt requirements.in` (analog für `requirements-dev`) neu erzeugen. Dependabot schlägt wöchentlich Updates für pip, npm, GitHub Actions und das Docker-Basisimage vor; die CI prüft mit `pip-audit` und `npm audit`.
+
+**Datenbankschema:** Die Anwendung führt beim Start `alembic upgrade head` aus. Bestehende Installationen ohne Migrationshistorie werden einmalig als Basisversion markiert. Nach Änderungen an `backend/db.py` eine Migration erzeugen: `DB_HOST=… alembic revision --autogenerate -m "Beschreibung"` gegen eine Entwicklungsdatenbank, Ergebnis prüfen und mit einchecken. Die CI bricht ab, wenn Modelle und Migrationen auseinanderlaufen (`alembic check`).
+
+**Version:** Das Image erhält die Version aus dem Git-Tag (`v1.2.3`) bzw. `sha-<commit>`; angemeldete Benutzer sehen sie über `/api/auth/me`.
 
 Für UI-Entwicklung: `npm run dev --prefix frontend`; Vite leitet `/api` an `127.0.0.1:8100` weiter. `APP_ORIGIN` dafür auf den Vite-Ursprung setzen. Alle Frontend-Abhängigkeiten liegen in `frontend/package-lock.json`; Python-Abhängigkeiten sind gepinnt.
 

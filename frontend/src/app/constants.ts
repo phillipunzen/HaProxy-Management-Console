@@ -1,0 +1,67 @@
+import {
+  Building2,
+  Activity,
+  FileCode2,
+  FileClock,
+  Filter,
+  Globe2,
+  KeyRound,
+  LayoutDashboard,
+  Network,
+  Server,
+  Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Waypoints,
+} from 'lucide-react';
+import { type Doc } from '../types';
+
+export const defaultDoc: Doc = {
+  http_port: 80,
+  https_port: 443,
+  tls_enabled: false,
+  acme_enabled: false,
+  acme_address: '127.0.0.1',
+  acme_port: 8888,
+  maxconn: 4096,
+  hosts: [],
+  rules: [],
+  version: 0,
+};
+export const navGroups = [
+  { key: 'workspace', label: 'Arbeitsbereich' },
+  { key: 'proxy', label: 'Proxy' },
+  { key: 'operations', label: 'Betrieb' },
+] as const;
+export const nav = [
+  { key: 'overview', label: 'Übersicht', icon: LayoutDashboard, group: 'workspace' },
+  { key: 'servers', label: 'Server', icon: Server, group: 'workspace' },
+  { key: 'infrastructures', label: 'Infrastrukturen', icon: Building2, group: 'workspace' },
+  { key: 'hosts', label: 'Proxy Hosts', icon: Globe2, group: 'proxy' },
+  { key: 'proxies', label: 'Frontends & Backends', icon: Network, group: 'proxy' },
+  { key: 'rules', label: 'Regeln & Redirects', icon: SlidersHorizontal, group: 'proxy' },
+  { key: 'access-profiles', label: 'IP-Filter-Profile', icon: Filter, group: 'proxy' },
+  { key: 'basic-auth', label: 'Basic Auth', icon: KeyRound, group: 'proxy' },
+  { key: 'certificates', label: 'Zertifikate', icon: ShieldCheck, group: 'proxy' },
+  { key: 'config', label: 'Konfiguration', icon: FileCode2, group: 'operations' },
+  { key: 'statistics', label: 'Statistiken', icon: Activity, group: 'operations' },
+  { key: 'topology', label: 'Topologie', icon: Waypoints, group: 'operations' },
+  { key: 'audit', label: 'Aktivitätsprotokoll', icon: FileClock, group: 'operations' },
+  { key: 'settings', label: 'Einstellungen', icon: Settings2, group: 'footer' },
+];
+export const labels: Record<string, string> = {
+  infrastructures: 'Infrastrukturen',
+  overview: 'Übersicht',
+  servers: 'Server',
+  hosts: 'Proxy Hosts',
+  certificates: 'Zertifikate',
+  proxies: 'Frontends & Backends',
+  rules: 'Regeln & Redirects',
+  'access-profiles': 'IP-Filter-Profile',
+  'basic-auth': 'Basic Auth',
+  config: 'Konfiguration',
+  statistics: 'Statistiken',
+  topology: 'Topologie',
+  audit: 'Aktivitätsprotokoll',
+  settings: 'Einstellungen',
+};

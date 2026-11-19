@@ -11,7 +11,7 @@ Er akzeptiert nur **GET** und **HEAD**. Es gibt keine WebUI, Login-, Konfigurati
 
 ## Aktivieren
 
-Die aktuelle `docker-compose.yml` und `.env.example` aus dem [Docker-ZIP](https://github.com/phillipunzen/HaProxy-Management-Console/raw/refs/heads/main/downloads/haproxy-management-docker.zip) verwenden. Vorhandene `.env`, Datenbank und Schlüssel erhalten. Folgende Variablen in der eigenen `.env` ergänzen:
+Die aktuelle `docker-compose.yml` und `.env.example` aus dem [Docker-ZIP](https://github.com/phillipunzen/HaProxy-Management-Console/releases/latest/download/haproxy-management-docker.zip) verwenden. Vorhandene `.env`, Datenbank und Schlüssel erhalten. Folgende Variablen in der eigenen `.env` ergänzen:
 
 ```dotenv
 # Hinter einem lokalen HTTPS-Reverseproxy nur auf localhost veröffentlichen.

@@ -1,5 +1,6 @@
 .env
 .env.*
+!.env.example
 ADMIN-ZUGANG.txt
 .git
 .venv
@@ -12,12 +13,12 @@ agent/config.json
 agent/state
 lab
 dist
-downloads/*
-!downloads/haproxy-management-docker.zip
+downloads/
 tests
 *.pem
 *.key
 *.ini
+!alembic.ini
 frontend/.test-build/
 !frontend/tests/
 !frontend/tests/**

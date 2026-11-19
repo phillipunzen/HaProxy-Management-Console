@@ -1,1 +1,29 @@
-{"name":"haproxy-management-ui","private":true,"version":"0.1.0","type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"tsc -b && vite build","test":"tsc src/apiError.ts src/proxyHealthState.ts src/proxyOptionTemplates.ts src/accessVisibility.ts src/agentSetupGuidance.ts --target ES2022 --module ESNext --skipLibCheck --outDir .test-build && node --test tests/*.test.mjs"},"dependencies":{"react":"^19.1.0","react-dom":"^19.1.0","lucide-react":"^0.468.0","recharts":"^3.0.0"},"devDependencies":{"@types/react":"^19.1.0","@types/react-dom":"^19.1.0","@vitejs/plugin-react":"^4.4.1","typescript":"^5.8.3","vite":"^6.3.5"}}
+{
+  "name": "haproxy-management-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "test": "tsc src/apiError.ts src/proxyHealthState.ts src/proxyOptionTemplates.ts src/accessVisibility.ts src/agentSetupGuidance.ts --target ES2022 --module ESNext --skipLibCheck --outDir .test-build && node --test tests/*.test.mjs",
+    "typecheck": "tsc -b --noEmit",
+    "format": "prettier --write src tests",
+    "format:check": "prettier --check src tests"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.2.8",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "recharts": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "prettier": "3.10.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

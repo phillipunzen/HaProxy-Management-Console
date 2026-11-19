@@ -38,7 +38,7 @@ Der aktuelle Installationsassistent lehnt gemeinsam genutzte oder ineinander lie
 
 Proxy Hosts, Redirects, ACLs, HTTP-/HTTPS-Listener, importierte Konfigurationen und Versionshistorien gehören jeweils zur ausgewählten HAProxy-Instanz. Der Zielserver steht auf der Seite und in den Bearbeitungsdialogen. Während ein Dialog, eine Bestätigung oder eine laufende Aktion offen ist, bleibt der Serverwechsel gesperrt. Nach einem Wechsel werden Bearbeitungsfunktionen erst mit den Daten des neuen Servers freigegeben.
 
-Grafische Änderungen zunächst speichern, **Konfiguration erzeugen**, den Entwurf für den angezeigten Zielserver prüfen und unter **Konfiguration → Prüfen & anwenden** aktivieren. Dadurch werden andere Server nicht automatisch geändert.
+Grafische Änderungen zunächst speichern, **Prüfen & anwenden** (Titelleiste), den Entwurf für den angezeigten Zielserver prüfen und unter **Konfiguration → Prüfen & anwenden** aktivieren. Dadurch werden andere Server nicht automatisch geändert.
 
 Basic-Auth-Benutzer und Gruppen sind zentral. Ihre Anwendung erfolgt ausdrücklich durch Gruppenzuordnung zu einzelnen Sites und anschließendes Anwenden der betreffenden Serverkonfiguration. Für voneinander unabhängige Website-Zugänge separate Gruppen und Benutzer verwenden. Verwaltungskonten, Basic-Auth-Verzeichnis und Aktivitätsprotokoll gelten für die gesamte Management-Oberfläche; die Infrastruktur-Auswahl filtert diese zentralen Ansichten nicht.
 
