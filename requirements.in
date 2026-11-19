@@ -1,0 +1,12 @@
+# Runtime dependencies of the management console and the agent.
+# Edit this file, then regenerate requirements.txt:
+#   pip-compile --generate-hashes --strip-extras -o requirements.txt requirements.in
+fastapi==0.135.1
+uvicorn==0.41.0
+SQLAlchemy==2.0.48
+alembic==1.20.1
+PyMySQL==1.1.2
+cryptography==50.0.2
+argon2-cffi==25.1.0
+httpx==0.28.1
+pydantic-settings==2.16.2

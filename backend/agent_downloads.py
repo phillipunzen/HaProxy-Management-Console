@@ -1,4 +1,5 @@
 """Standalone, anonymous file downloads; no management imports or credentials."""
+
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,8 +13,9 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=
 async def download_headers(request: Request, call_next):
     # Downloads accept neither uploads nor ranges. Never parse a request body.
     if request.method not in ('GET', 'HEAD'):
-        response = JSONResponse({'detail': 'Nur GET und HEAD erlaubt.'}, status_code=405,
-                                headers={'Allow': 'GET, HEAD'})
+        response = JSONResponse(
+            {'detail': 'Nur GET und HEAD erlaubt.'}, status_code=405, headers={'Allow': 'GET, HEAD'}
+        )
     elif request.headers.get('range'):
         response = JSONResponse({'detail': 'Nur vollständige Downloads erlaubt.'}, status_code=416)
     elif request.headers.get('transfer-encoding') or request.headers.get('content-length', '0') != '0':
@@ -30,11 +32,13 @@ async def download_headers(request: Request, call_next):
 
 @app.api_route('/api/agent-installer', methods=['GET', 'HEAD'])
 def installer():
-    return FileResponse(ROOT / 'scripts/install-agent.sh', media_type='text/plain',
-                        filename='install-agent.sh')
+    return FileResponse(ROOT / 'scripts/install-agent.sh', media_type='text/plain', filename='install-agent.sh')
 
 
 @app.api_route('/api/agent-package', methods=['GET', 'HEAD'])
 def package():
-    return FileResponse(ROOT / 'downloads/haproxy-management-docker.zip', media_type='application/zip',
-                        filename='haproxy-management-docker.zip')
+    return FileResponse(
+        ROOT / 'downloads/haproxy-management-docker.zip',
+        media_type='application/zip',
+        filename='haproxy-management-docker.zip',
+    )

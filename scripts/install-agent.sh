@@ -55,21 +55,23 @@ PY
 python3 -m venv "$haproxy_install_dir/.venv"
 "$haproxy_install_dir/.venv/bin/pip" install -r "$haproxy_install_dir/requirements.txt"
 if [[ ${HAPROXY_AGENT_UPDATE_ONLY:-0} == 1 ]]; then
-  # Existing imported LEGO stores may live under systemd's read-only /etc.
+  # Upgrade the sandbox of existing units; all profile paths (including imported
+  # LEGO stores) stay writable, everything else becomes read-only.
   PYTHONPATH="$haproxy_install_dir" "$haproxy_install_dir/.venv/bin/python" - <<'PY'
-import json,re
+import json
 from pathlib import Path
 from agent import main as agent
+from agent.setup_checks import hardening_dropin, profile_writable_dirs
 conf=json.loads(Path('/etc/haproxy-control/agent.json').read_text())
-paths=set()
-for profile in conf['profiles'].values():
-    path=profile.get('lego',{}).get('path')
-    if path:
-        if not path.startswith('/') or '..' in path.split('/') or re.search(r'[\s%]',path):
-            raise SystemExit('Ungültiger LEGO-Pfad im Agent-Profil.')
-        paths.add(path)
-target=Path('/etc/systemd/system/haproxy-control-agent.service.d/99-management-acme.conf')
-agent.atomic(target,('[Service]\n'+('ReadWritePaths='+' '.join('-'+p for p in sorted(paths))+'\n' if paths else '')).encode(),0o644)
+try:
+    dirs=profile_writable_dirs(conf['profiles'].values())
+except ValueError as error:
+    raise SystemExit(str(error))
+dropin=Path('/etc/systemd/system/haproxy-control-agent.service.d')
+dropin.mkdir(parents=True,exist_ok=True)
+agent.atomic(dropin/'50-hardening.conf',hardening_dropin(dirs).encode(),0o644,0,0)
+legacy=dropin/'99-management-acme.conf'
+if legacy.exists(): legacy.unlink()
 PY
   systemctl daemon-reload
   systemctl restart haproxy-control-agent
@@ -82,7 +84,7 @@ cd "$haproxy_install_dir"
 import base64, json, os, re, shutil, socket, subprocess, tempfile, time
 from pathlib import Path
 from agent import main as agent
-from agent.setup_checks import tls_options, docker_directories
+from agent.setup_checks import tls_options, docker_directories, profile_writable_dirs, read_write_paths, HARDENING
 
 setup = json.loads(base64.b64decode(os.environ['HAPROXY_AGENT_SETUP_B64'], validate=True))
 name, p = setup['profile_name'], setup['profile']
@@ -125,16 +127,14 @@ else:
     writable_config_dirs = {str(Path(p['config_path']).parent)}
     agent.run(['systemctl', 'is-active', p['service']])
 
-writable_dirs = writable_config_dirs | {p['cert_dir'], str(Path(p['runtime_socket']).parent), '/etc/letsencrypt', '/etc/lego'}
-for other in existing['profiles'].values():
-    writable_dirs.update({str(Path(other['config_path']).parent),str(Path(other['runtime_socket']).parent)})
-    for source in other.get('config_sources',[]) + other.get('_detected_sources',[]):
-        writable_dirs.add(str(Path(source) if Path(source).is_dir() else Path(source).parent))
-    if other.get('cert_dir'): writable_dirs.add(other['cert_dir'])
-    if other.get('lego',{}).get('path'): writable_dirs.add(other['lego']['path'])
+writable_dirs = writable_config_dirs | {p['cert_dir'], str(Path(p['runtime_socket']).parent)}
+try:
+    writable_dirs |= profile_writable_dirs([*existing['profiles'].values(), p])
+except ValueError as error:
+    raise SystemExit(str(error))
 if any(re.search(r'[\s%]', path) or '..' in Path(path).parts for path in writable_dirs):
     raise SystemExit('Ungültiger Schreibpfad für Agent-Unit.')
-read_write_paths = ' '.join('-'+path for path in sorted(writable_dirs))
+unit_read_write_paths = read_write_paths(writable_dirs)
 
 haproxy_config = Path(p['config_path'])
 if not haproxy_config.is_file():
@@ -201,10 +201,7 @@ ExecStart=/opt/haproxy-control-agent/.venv/bin/uvicorn agent.main:app --host {se
 Restart=on-failure
 RestartSec=5
 UMask=0077
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=full
-ReadWritePaths={read_write_paths}
+{HARDENING}ReadWritePaths={unit_read_write_paths}
 [Install]
 WantedBy=multi-user.target
 '''
@@ -212,6 +209,9 @@ target = Path('/etc/systemd/system/haproxy-control-agent.service')
 if target.exists():
     shutil.copy2(target, target.with_name(target.name + '.before-setup-' + str(time.time_ns())))
 agent.atomic(target, unit.encode(), 0o644, 0, 0)
+stale = Path('/etc/systemd/system/haproxy-control-agent.service.d/50-hardening.conf')
+if stale.exists():
+    stale.unlink()
 override = Path('/etc/systemd/system/haproxy-control-agent.service.d/99-management-setup.conf')
 override.parent.mkdir(parents=True, exist_ok=True)
 agent.atomic(override, ('[Service]\nExecStart=\nExecStart=' + unit.split('ExecStart=', 1)[1].split('\n', 1)[0] + '\n').encode(), 0o644, 0, 0)

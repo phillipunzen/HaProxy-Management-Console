@@ -1,5 +1,7 @@
 # Validierung am Entwicklungsserver
 
+**CI (GitHub Actions):** `pytest` sammelt sämtliche Testdateien; Labortests überspringen sich ohne ihre Opt-in-Variablen selbst. Ein eigener Job führt alle `*_runtime.py`-Tests mit `HAPROXY_BASIC_AUTH_LAB=1` gegen echtes HAProxy 3.2 (nativ aus dem PPA und als Docker-Image) aus. Dazu kommen ruff (Lint + Format), `alembic upgrade head`/`alembic check` gegen MariaDB, `pip-audit`, sowie im Frontend Typprüfung, Prettier, Unit-Tests und `npm audit`. Nur `test_integration.py` und `test_import_integration.py` benötigen weiterhin einen manuell bereitgestellten Laboragenten.
+
 Stand: 9. Oktober 2026.
 
 - Frontend-Produktionsbuild mit TypeScript erfolgreich.

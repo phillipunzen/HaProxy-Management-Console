@@ -1,8 +1,11 @@
 # Copy .env.example to .env and configure it before starting.
-# Start: docker compose -f docker-compose.yml up -d
+# Published image:  docker compose -f docker-compose.yml pull && docker compose -f docker-compose.yml up -d
+# Local build (repository checkout only): docker compose -f docker-compose.yml up -d --build
 services:
   app:
     image: ghcr.io/phillipunzen/haproxy-management-console:${IMAGE_TAG:-latest}
+    build:
+      context: .
     restart: unless-stopped
     ports:
       - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8100}:8000"
@@ -24,6 +27,8 @@ services:
       METRICS_FINE_DAYS: ${METRICS_FINE_DAYS:-1}
       METRICS_RETENTION_DAYS: ${METRICS_RETENTION_DAYS:-7}
       AGENT_CA_FILE: ${AGENT_CA_FILE:-}
+      # IP/CIDR of a reverse proxy in front of the UI (e.g. 172.18.0.0/16); empty = trust none.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     # Optional internal CA: enable this mount and set AGENT_CA_FILE in .env.
     # volumes:
     #   - ./agent-ca-bundle.pem:/certs/agent-ca-bundle.pem:ro

@@ -1,83 +1,893 @@
-import {useState} from 'react';
-import {Check,Clock3,Download,FileCode2,Loader2,Plus,RefreshCw,Settings2,ShieldCheck,Trash2} from 'lucide-react';
+import { useState } from 'react';
+import {
+  Check,
+  Clock3,
+  Download,
+  FileCode2,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+} from 'lucide-react';
 
-export type Certificate={name:string;domains?:string[];issuer?:string;days_remaining?:number;expires_at?:string;staging:boolean;error?:string;managed?:boolean;engine?:string;automatic?:boolean;production_template?:{email?:string;challenge?:string;provider?:string;dns_credential?:string;automatic?:boolean}};
-export type CertificateCapabilities={certificate_delete?:boolean;certificate_management?:boolean;certificate_scope_error?:string|null;acme_engines?:string[];dns_providers:string[];http_challenge:boolean;dns_credentials_ui?:boolean;dns_credentials?:{id:string;provider:string;label:string}[];lego_adoption?:boolean;lego_host_credentials?:boolean};
-export type RenewalSettings={enabled:boolean;schedule:'interval'|'daily';interval_hours:number;daily_time:string;timezone:string;next_check?:string|null;last_attempt?:string|null;last_success?:string|null;last_error?:string|null;last_result?:{errors?:{name:string;error:string}[]}};
-const date=(v?:string|null)=>v?new Date(v).toLocaleString('de-DE',{timeZone:'Europe/Berlin'}):'—';
+export type Certificate = {
+  name: string;
+  domains?: string[];
+  issuer?: string;
+  days_remaining?: number;
+  expires_at?: string;
+  staging: boolean;
+  error?: string;
+  managed?: boolean;
+  engine?: string;
+  automatic?: boolean;
+  production_template?: {
+    email?: string;
+    challenge?: string;
+    provider?: string;
+    dns_credential?: string;
+    automatic?: boolean;
+  };
+};
+export type CertificateCapabilities = {
+  certificate_delete?: boolean;
+  certificate_management?: boolean;
+  certificate_scope_error?: string | null;
+  acme_engines?: string[];
+  dns_providers: string[];
+  http_challenge: boolean;
+  dns_credentials_ui?: boolean;
+  dns_credentials?: { id: string; provider: string; label: string }[];
+  lego_adoption?: boolean;
+  lego_host_credentials?: boolean;
+};
+export type RenewalSettings = {
+  enabled: boolean;
+  schedule: 'interval' | 'daily';
+  interval_hours: number;
+  daily_time: string;
+  timezone: string;
+  next_check?: string | null;
+  last_attempt?: string | null;
+  last_success?: string | null;
+  last_error?: string | null;
+  last_result?: { errors?: { name: string; error: string }[] };
+};
+const date = (v?: string | null) =>
+  v ? new Date(v).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : '—';
 
-export function CertificatesPanel({certs,cap,schedule,busy,canEdit,onRequest,onProduction,onAdopt,onPem,onSchedule,onRenew,onForce,onPolicy,onDelete}:{certs:Certificate[];cap:CertificateCapabilities|null;schedule:RenewalSettings|null;busy:boolean;canEdit:boolean;onRequest:()=>void;onProduction:(cert:Certificate)=>void;onAdopt:()=>void;onPem:()=>void;onSchedule:()=>void;onRenew:(name?:string)=>void;onForce:(name:string)=>void;onPolicy:(cert:Certificate)=>void;onDelete:(cert:Certificate)=>void}){
-  const locked=busy||!cap||!!cap.certificate_scope_error;
-  return <>
-    {cap?.certificate_scope_error&&<div className="notice error">{cap.certificate_scope_error}</div>}
-    <div className="cert-summary"><div><ShieldCheck size={24}/><span><strong>{certs.filter(c=>!c.staging).length}</strong> Zertifikate</span></div><div><Clock3 size={22}/><span><strong>{certs.filter(c=>!c.staging&&(c.days_remaining??999)<30).length}</strong> laufen bald ab</span></div><div><RefreshCw size={21}/><span>{schedule?schedule.enabled?schedule.schedule==='daily'?`Täglich ${schedule.daily_time} (${schedule.timezone})`:`Prüfung alle ${schedule.interval_hours} Stunden`:'Automatische Erneuerung pausiert':'Erneuerung auf dem Agenten'}</span></div></div>
-    <section className="panel"><div className="panel-header"><div><h2>Erneuerung & ACME-Aufträge</h2><p>Einzelne Domains, Wildcards oder ein gemeinsames Zertifikat für mehrere Sites.</p></div>{canEdit&&<button className="button secondary" disabled={locked||!cap?.certificate_management} onClick={onSchedule}><Settings2 size={16}/>Zeitplan</button>}</div><div className="settings-body">
-      {schedule&&<p>Nächste Prüfung: {date(schedule.next_check)} · Letzte erfolgreiche Prüfung: {date(schedule.last_success)}</p>}
-      {schedule?.last_error&&<div className="notice error">{schedule.last_error}</div>}
-      {!!schedule?.last_result?.errors?.length&&<div className="notice error">{schedule.last_result.errors.map(e=>`${e.name}: ${e.error}`).join(' · ')}</div>}
-      {!cap?.certificate_management&&<div className="notice">Für Zeitpläne, einzelne Erneuerungen und LEGO-Übernahme unter Server den Agenten aktualisieren.</div>}
-      <div className="row-actions certificate-actions">{canEdit&&<><button className="button" disabled={locked} onClick={onRequest}><Plus size={16}/>Zertifikat anfordern</button><button className="button secondary" disabled={locked||!cap?.certificate_management||!cap.lego_adoption} onClick={onAdopt}><Download size={16}/>LEGO übernehmen</button><button className="button secondary" disabled={locked} onClick={onPem}><Download size={16}/>PEM importieren</button><button className="button secondary" disabled={locked} onClick={()=>onRenew()}><RefreshCw size={16}/>Alle Erneuerungen prüfen</button></>}<a className="text-button" href="/api/certificate-guide" target="_blank" rel="noreferrer"><FileCode2 size={16}/>Einrichtung & LEGO-Anleitung</a></div>
-      <p className="stats-note">LEGO und Certbot entscheiden anhand der Gültigkeit und ACME-Erneuerungsinformationen, wann ein neues Zertifikat nötig ist. HAProxy wird nur bei geändertem PEM nach erfolgreicher Konfigurationsprüfung neu geladen. Manuelle PEM-Dateien benötigen einen ACME-Auftrag zur automatischen Erneuerung.</p>
-    </div></section>
-    {canEdit&&!cap?.certificate_delete&&<div className="notice">Für das Löschen von Zertifikaten unter Server den Agenten aktualisieren.</div>}
-    {certs.some(c=>c.staging)&&<div className="notice">Staging-Zertifikate bestätigen, dass die Ausstellung funktioniert. Browser vertrauen diesen Testzertifikaten nicht. Über „Produktion anfordern“ kannst du die getesteten Einstellungen für ein vertrauenswürdiges Zertifikat übernehmen.</div>}
-    <section className="panel">{certs.length?<div className="table-wrap"><table><thead><tr><th>ZERTIFIKAT</th><th>DOMAINS</th><th>GÜLTIG BIS</th><th>ERNEUERUNG</th><th>AKTIONEN</th></tr></thead><tbody>{certs.map(c=><tr key={c.name+String(c.staging)}><td><strong>{c.name}</strong><small>{c.error||c.issuer}</small><span className={'badge '+(c.staging?'amber':(c.days_remaining??-1)<0?'red':'green')}>{c.staging?'Staging':(c.days_remaining??-1)<0?'Abgelaufen':'Produktion'}</span></td><td><details className="backend-targets"><summary>{c.domains?.length||0} Domains</summary>{c.domains?.map(d=><small key={d} className="mono">{d}</small>)}</details></td><td>{date(c.expires_at)}<small>{c.days_remaining} Tage</small></td><td>{c.staging?'Testzertifikat':c.managed?`${c.engine==='lego'?'LEGO':'Certbot'} · ${c.automatic?'Automatisch':'Pausiert'}`:c.managed===false?'Extern / PEM':'Agent aktualisieren'}</td><td>{canEdit&&c.staging&&!c.error&&<button className="button secondary" disabled={locked} onClick={()=>onProduction(c)}><ShieldCheck size={16}/>Produktion anfordern</button>}{canEdit&&c.managed&&!c.staging&&<div className="row-actions"><button className="icon-button" aria-label={'Erneuerung für '+c.name+' prüfen'} disabled={locked} onClick={()=>onRenew(c.name)}><RefreshCw size={16}/></button><button className="text-button" disabled={locked} onClick={()=>onForce(c.name)}>Jetzt erneuern</button><button className="icon-button" aria-label={'Automatische Erneuerung für '+c.name+' bearbeiten'} disabled={locked} onClick={()=>onPolicy(c)}><Settings2 size={16}/></button></div>}{canEdit&&<button className="icon-button red-text" aria-label={(c.staging?'Staging-Zertifikat ':'Produktionszertifikat ')+c.name+' löschen'} title={cap?.certificate_delete?'Zertifikat löschen':'Zum Löschen den Agenten aktualisieren'} disabled={locked||!cap?.certificate_delete} onClick={()=>onDelete(c)}><Trash2 size={16}/></button>}</td></tr>)}</tbody></table></div>:<div className="empty"><ShieldCheck size={28}/><h3>TLS für deine Domains</h3><p>Neue Zertifikate anfordern, vorhandene LEGO-Aufträge übernehmen oder eigene Zertifikate und Schlüssel als PEM importieren.</p></div>}</section>
-  </>;
+export function CertificatesPanel({
+  certs,
+  cap,
+  schedule,
+  busy,
+  canEdit,
+  onRequest,
+  onProduction,
+  onAdopt,
+  onPem,
+  onSchedule,
+  onRenew,
+  onForce,
+  onPolicy,
+  onDelete,
+}: {
+  certs: Certificate[];
+  cap: CertificateCapabilities | null;
+  schedule: RenewalSettings | null;
+  busy: boolean;
+  canEdit: boolean;
+  onRequest: () => void;
+  onProduction: (cert: Certificate) => void;
+  onAdopt: () => void;
+  onPem: () => void;
+  onSchedule: () => void;
+  onRenew: (name?: string) => void;
+  onForce: (name: string) => void;
+  onPolicy: (cert: Certificate) => void;
+  onDelete: (cert: Certificate) => void;
+}) {
+  const locked = busy || !cap || !!cap.certificate_scope_error;
+  return (
+    <>
+      {cap?.certificate_scope_error && <div className="notice error">{cap.certificate_scope_error}</div>}
+      <div className="cert-summary">
+        <div>
+          <ShieldCheck size={24} />
+          <span>
+            <strong>{certs.filter((c) => !c.staging).length}</strong> Zertifikate
+          </span>
+        </div>
+        <div>
+          <Clock3 size={22} />
+          <span>
+            <strong>{certs.filter((c) => !c.staging && (c.days_remaining ?? 999) < 30).length}</strong> laufen
+            bald ab
+          </span>
+        </div>
+        <div>
+          <RefreshCw size={21} />
+          <span>
+            {schedule
+              ? schedule.enabled
+                ? schedule.schedule === 'daily'
+                  ? `Täglich ${schedule.daily_time} (${schedule.timezone})`
+                  : `Prüfung alle ${schedule.interval_hours} Stunden`
+                : 'Automatische Erneuerung pausiert'
+              : 'Erneuerung auf dem Agenten'}
+          </span>
+        </div>
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Erneuerung & ACME-Aufträge</h2>
+            <p>Einzelne Domains, Wildcards oder ein gemeinsames Zertifikat für mehrere Sites.</p>
+          </div>
+          {canEdit && (
+            <button
+              className="button secondary"
+              disabled={locked || !cap?.certificate_management}
+              onClick={onSchedule}
+            >
+              <Settings2 size={16} />
+              Zeitplan
+            </button>
+          )}
+        </div>
+        <div className="settings-body">
+          {schedule && (
+            <p>
+              Nächste Prüfung: {date(schedule.next_check)} · Letzte erfolgreiche Prüfung:{' '}
+              {date(schedule.last_success)}
+            </p>
+          )}
+          {schedule?.last_error && <div className="notice error">{schedule.last_error}</div>}
+          {!!schedule?.last_result?.errors?.length && (
+            <div className="notice error">
+              {schedule.last_result.errors.map((e) => `${e.name}: ${e.error}`).join(' · ')}
+            </div>
+          )}
+          {!cap?.certificate_management && (
+            <div className="notice">
+              Für Zeitpläne, einzelne Erneuerungen und LEGO-Übernahme unter Server den Agenten aktualisieren.
+            </div>
+          )}
+          <div className="row-actions certificate-actions">
+            {canEdit && (
+              <>
+                <button className="button" disabled={locked} onClick={onRequest}>
+                  <Plus size={16} />
+                  Zertifikat anfordern
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={locked || !cap?.certificate_management || !cap.lego_adoption}
+                  onClick={onAdopt}
+                >
+                  <Download size={16} />
+                  LEGO übernehmen
+                </button>
+                <button className="button secondary" disabled={locked} onClick={onPem}>
+                  <Download size={16} />
+                  PEM importieren
+                </button>
+                <button className="button secondary" disabled={locked} onClick={() => onRenew()}>
+                  <RefreshCw size={16} />
+                  Alle Erneuerungen prüfen
+                </button>
+              </>
+            )}
+            <a className="text-button" href="/api/certificate-guide" target="_blank" rel="noreferrer">
+              <FileCode2 size={16} />
+              Einrichtung & LEGO-Anleitung
+            </a>
+          </div>
+          <p className="stats-note">
+            LEGO und Certbot entscheiden anhand der Gültigkeit und ACME-Erneuerungsinformationen, wann ein
+            neues Zertifikat nötig ist. HAProxy wird nur bei geändertem PEM nach erfolgreicher
+            Konfigurationsprüfung neu geladen. Manuelle PEM-Dateien benötigen einen ACME-Auftrag zur
+            automatischen Erneuerung.
+          </p>
+        </div>
+      </section>
+      {canEdit && !cap?.certificate_delete && (
+        <div className="notice">Für das Löschen von Zertifikaten unter Server den Agenten aktualisieren.</div>
+      )}
+      {certs.some((c) => c.staging) && (
+        <div className="notice">
+          Staging-Zertifikate bestätigen, dass die Ausstellung funktioniert. Browser vertrauen diesen
+          Testzertifikaten nicht. Über „Produktion anfordern“ kannst du die getesteten Einstellungen für ein
+          vertrauenswürdiges Zertifikat übernehmen.
+        </div>
+      )}
+      <section className="panel">
+        {certs.length ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ZERTIFIKAT</th>
+                  <th>DOMAINS</th>
+                  <th>GÜLTIG BIS</th>
+                  <th>ERNEUERUNG</th>
+                  <th>AKTIONEN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {certs.map((c) => (
+                  <tr key={c.name + String(c.staging)}>
+                    <td>
+                      <strong>{c.name}</strong>
+                      <small>{c.error || c.issuer}</small>
+                      <span
+                        className={
+                          'badge ' + (c.staging ? 'amber' : (c.days_remaining ?? -1) < 0 ? 'red' : 'green')
+                        }
+                      >
+                        {c.staging ? 'Staging' : (c.days_remaining ?? -1) < 0 ? 'Abgelaufen' : 'Produktion'}
+                      </span>
+                    </td>
+                    <td>
+                      <details className="backend-targets">
+                        <summary>{c.domains?.length || 0} Domains</summary>
+                        {c.domains?.map((d) => (
+                          <small key={d} className="mono">
+                            {d}
+                          </small>
+                        ))}
+                      </details>
+                    </td>
+                    <td>
+                      {date(c.expires_at)}
+                      <small>{c.days_remaining} Tage</small>
+                    </td>
+                    <td>
+                      {c.staging
+                        ? 'Testzertifikat'
+                        : c.managed
+                          ? `${c.engine === 'lego' ? 'LEGO' : 'Certbot'} · ${c.automatic ? 'Automatisch' : 'Pausiert'}`
+                          : c.managed === false
+                            ? 'Extern / PEM'
+                            : 'Agent aktualisieren'}
+                    </td>
+                    <td>
+                      {canEdit && c.staging && !c.error && (
+                        <button
+                          className="button secondary"
+                          disabled={locked}
+                          onClick={() => onProduction(c)}
+                        >
+                          <ShieldCheck size={16} />
+                          Produktion anfordern
+                        </button>
+                      )}
+                      {canEdit && c.managed && !c.staging && (
+                        <div className="row-actions">
+                          <button
+                            className="icon-button"
+                            aria-label={'Erneuerung für ' + c.name + ' prüfen'}
+                            disabled={locked}
+                            onClick={() => onRenew(c.name)}
+                          >
+                            <RefreshCw size={16} />
+                          </button>
+                          <button className="text-button" disabled={locked} onClick={() => onForce(c.name)}>
+                            Jetzt erneuern
+                          </button>
+                          <button
+                            className="icon-button"
+                            aria-label={'Automatische Erneuerung für ' + c.name + ' bearbeiten'}
+                            disabled={locked}
+                            onClick={() => onPolicy(c)}
+                          >
+                            <Settings2 size={16} />
+                          </button>
+                        </div>
+                      )}
+                      {canEdit && (
+                        <button
+                          className="icon-button red-text"
+                          aria-label={
+                            (c.staging ? 'Staging-Zertifikat ' : 'Produktionszertifikat ') +
+                            c.name +
+                            ' löschen'
+                          }
+                          title={
+                            cap?.certificate_delete
+                              ? 'Zertifikat löschen'
+                              : 'Zum Löschen den Agenten aktualisieren'
+                          }
+                          disabled={locked || !cap?.certificate_delete}
+                          onClick={() => onDelete(c)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty">
+            <ShieldCheck size={28} />
+            <h3>TLS für deine Domains</h3>
+            <p>
+              Neue Zertifikate anfordern, vorhandene LEGO-Aufträge übernehmen oder eigene Zertifikate und
+              Schlüssel als PEM importieren.
+            </p>
+          </div>
+        )}
+      </section>
+    </>
+  );
 }
 
-export function CertificateRequestForm({cap,domains,busy,adopt=false,productionFrom=null,productionNames=[],onClose,onSave}:{cap:CertificateCapabilities|null;domains:string[];busy:boolean;adopt?:boolean;productionFrom?:Certificate|null;productionNames?:string[];onClose:()=>void;onSave:(v:any)=>Promise<void>}){
-  const template=productionFrom?.production_template;
-  const stored=template?.dns_credential&&cap?.dns_credentials?.some(c=>c.id===template.dns_credential&&c.provider===(template.provider||'cloudflare'))?template.dns_credential:null;
-  const [v,setV]=useState({name:productionFrom?.name||(adopt?'cert':''),domains:productionFrom?.domains?.join('\n')||'',source_name:'',email:template?.email||'',challenge:template?.challenge||'dns',provider:template?.provider||'cloudflare',staging:productionFrom?false:!adopt,automatic:template?.automatic??true,dns_token:'',dns_zone_token:''}),[mode,setMode]=useState('custom'),[access,setAccess]=useState(stored||(adopt&&cap?.lego_host_credentials?'host':'new')),[error,setError]=useState('');
-  const available=!cap?.certificate_scope_error&&(adopt?cap?.lego_adoption:true)&&(v.challenge==='http'?cap?.http_challenge:cap?.dns_credentials_ui&&cap.acme_engines?.includes('lego'));
-  const saved=cap?.dns_credentials?.filter(c=>c.provider===v.provider)||[];
-  async function submit(){
+export function CertificateRequestForm({
+  cap,
+  domains,
+  busy,
+  adopt = false,
+  productionFrom = null,
+  productionNames = [],
+  onClose,
+  onSave,
+}: {
+  cap: CertificateCapabilities | null;
+  domains: string[];
+  busy: boolean;
+  adopt?: boolean;
+  productionFrom?: Certificate | null;
+  productionNames?: string[];
+  onClose: () => void;
+  onSave: (v: any) => Promise<void>;
+}) {
+  const template = productionFrom?.production_template;
+  const stored =
+    template?.dns_credential &&
+    cap?.dns_credentials?.some(
+      (c) => c.id === template.dns_credential && c.provider === (template.provider || 'cloudflare'),
+    )
+      ? template.dns_credential
+      : null;
+  const [v, setV] = useState({
+      name: productionFrom?.name || (adopt ? 'cert' : ''),
+      domains: productionFrom?.domains?.join('\n') || '',
+      source_name: '',
+      email: template?.email || '',
+      challenge: template?.challenge || 'dns',
+      provider: template?.provider || 'cloudflare',
+      staging: productionFrom ? false : !adopt,
+      automatic: template?.automatic ?? true,
+      dns_token: '',
+      dns_zone_token: '',
+    }),
+    [mode, setMode] = useState('custom'),
+    [access, setAccess] = useState(stored || (adopt && cap?.lego_host_credentials ? 'host' : 'new')),
+    [error, setError] = useState('');
+  const available =
+    !cap?.certificate_scope_error &&
+    (adopt ? cap?.lego_adoption : true) &&
+    (v.challenge === 'http'
+      ? cap?.http_challenge
+      : cap?.dns_credentials_ui && cap.acme_engines?.includes('lego'));
+  const saved = cap?.dns_credentials?.filter((c) => c.provider === v.provider) || [];
+  async function submit() {
     setError('');
-    const requested=v.domains.split(/[\s,]+/).filter(Boolean);
-    if(v.challenge==='http'&&requested.some(d=>d.startsWith('*.'))){setError('Wildcard-Zertifikate benötigen eine DNS-Challenge.');return;}
-    const {dns_token,dns_zone_token,...publicFields}=v;
-    const credentials=v.challenge==='dns'?(access==='new'?{dns_token,...(v.provider==='cloudflare'&&dns_zone_token?{dns_zone_token}:{})}:access==='host'?{}:{dns_credential:access}):{};
-    try{await onSave({...publicFields,provider:v.challenge==='dns'?v.provider:'',domains:requested,engine:adopt?'lego':'auto',...(adopt?{staging:false}:{}),...credentials});}catch(e){setError((e as Error).message);}
+    const requested = v.domains.split(/[\s,]+/).filter(Boolean);
+    if (v.challenge === 'http' && requested.some((d) => d.startsWith('*.'))) {
+      setError('Wildcard-Zertifikate benötigen eine DNS-Challenge.');
+      return;
+    }
+    const { dns_token, dns_zone_token, ...publicFields } = v;
+    const credentials =
+      v.challenge === 'dns'
+        ? access === 'new'
+          ? { dns_token, ...(v.provider === 'cloudflare' && dns_zone_token ? { dns_zone_token } : {}) }
+          : access === 'host'
+            ? {}
+            : { dns_credential: access }
+        : {};
+    try {
+      await onSave({
+        ...publicFields,
+        provider: v.challenge === 'dns' ? v.provider : '',
+        domains: requested,
+        engine: adopt ? 'lego' : 'auto',
+        ...(adopt ? { staging: false } : {}),
+        ...credentials,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
-  return <form className="form-body" onSubmit={e=>{e.preventDefault();if(!busy)void submit();}}><fieldset className="imported-form-fields" disabled={busy}>
-    {error&&<div className="notice error" role="alert">{error}</div>}
-    {productionFrom&&<div className="notice">Produktionsanforderung aus dem Testzertifikat „{productionFrom.name}“. Domains und verfügbare Auftragseinstellungen sind vorbelegt. Das Testzertifikat bleibt erhalten; das neue Zertifikat wird erst beim Absenden ausgestellt.</div>}
-    {!v.staging&&productionNames.includes(v.name)&&<div className="notice error">Auf diesem Server existiert bereits das Produktionszertifikat „{v.name}“. Diese Anforderung ersetzt es nach erfolgreicher Prüfung und lädt HAProxy neu. Für ein zusätzliches Zertifikat einen anderen PEM-Namen wählen.</div>}
-    <div className="field"><label htmlFor="cert-challenge">Challenge</label><select id="cert-challenge" value={v.challenge} onChange={e=>{setV({...v,challenge:e.target.value,dns_token:'',dns_zone_token:''});setAccess(adopt&&cap?.lego_host_credentials?'host':'new');}}><option value="dns">DNS-Challenge · auch für Wildcards</option><option value="http">HTTP-Challenge · Port 80 / Webroot</option></select></div>
-    {v.challenge==='dns'&&<>
-      <div className="field"><label htmlFor="cert-provider">DNS-Anbieter</label><select id="cert-provider" value={v.provider} onChange={e=>{setV({...v,provider:e.target.value,dns_token:'',dns_zone_token:''});setAccess('new');}}><option value="cloudflare">Cloudflare</option><option value="hetzner">Hetzner Cloud · DNS in der Hetzner Console</option></select></div>
-      <div className="field"><label htmlFor="cert-access">DNS-Zugang auf diesem Server</label><select id="cert-access" value={access} onChange={e=>{setAccess(e.target.value);setV({...v,dns_token:'',dns_zone_token:''});}}><option value="new">Neuen API-Token hinterlegen</option>{saved.map(c=><option key={c.id} value={c.id}>{c.label} · gespeicherten Zugang verwenden</option>)}{adopt&&cap?.lego_host_credentials&&<option value="host">Vorhandene LEGO-Zugangsdaten auf dem Host verwenden</option>}</select></div>
-      {access==='new'&&<>
-        <div className="field"><label htmlFor="cert-dns-token">{v.provider==='cloudflare'?'Cloudflare DNS API-Token':'Hetzner Cloud API-Token'}</label><input id="cert-dns-token" type="password" autoComplete="off" spellCheck={false} required maxLength={512} pattern="[a-zA-Z0-9._~\-]+" value={v.dns_token} onChange={e=>setV({...v,dns_token:e.target.value})}/><small>{v.provider==='cloudflare'?'Token mit Zone → DNS → Bearbeiten und Zone → Zone → Lesen für alle angegebenen Domains.':'Projekt-Token mit Lesen & Schreiben aus der Hetzner Console; die DNS-Zonen müssen in diesem Projekt liegen.'}</small></div>
-        {v.provider==='cloudflare'&&<div className="field"><label htmlFor="cert-zone-token">Separater Zone API-Token (optional)</label><input id="cert-zone-token" type="password" autoComplete="off" spellCheck={false} maxLength={512} pattern="[a-zA-Z0-9._~\-]+" value={v.dns_zone_token} onChange={e=>setV({...v,dns_zone_token:e.target.value})}/><small>Nur nötig, wenn Zone-Leserechte auf einen zweiten Token aufgeteilt sind.</small></div>}
-      </>}
-      <p className="stats-note">Zugangsdaten werden geschützt auf dem ausgewählten Agenten gespeichert und bei der Erneuerung wiederverwendet. Andere Server erhalten diesen Zugang nicht. Gespeicherte Tokens werden nicht angezeigt.</p>
-    </>}
-    {v.challenge==='http'&&<div className="notice">Jede Domain muss öffentlich auf diesen HAProxy zeigen. Port 80 und die Weiterleitung für /.well-known/acme-challenge/ zum Webroot-Dienst müssen erreichbar sein. <a href="/api/certificate-guide" target="_blank" rel="noreferrer">HTTP-Einrichtung</a></div>}
-    <div className="field"><label htmlFor="cert-name">PEM-Name auf diesem Server</label><input id="cert-name" required pattern="[a-zA-Z0-9_-]+" maxLength={80} value={v.name} onChange={e=>setV({...v,name:e.target.value})} placeholder="example-wildcard"/><small>„cert“ verwendet cert.pem und passt zu einem bestehenden Listener mit dieser Datei.</small></div>
-    {!adopt&&<div className="field"><label htmlFor="cert-coverage">Umfang</label><select id="cert-coverage" value={mode} onChange={e=>{setMode(e.target.value);if(e.target.value==='all')setV({...v,domains:domains.join('\n')});if(e.target.value==='single')setV({...v,domains:domains[0]||''});}}><option value="custom">Eigene Domain-Liste / Wildcards</option><option value="single" disabled={!domains.length}>Einzelne Reverseproxy-Site</option><option value="all" disabled={!domains.length}>Alle Sites dieses Servers gemeinsam</option></select></div>}
-    {mode==='single'&&<div className="field"><label htmlFor="cert-site">Reverseproxy-Site</label><select id="cert-site" value={v.domains} onChange={e=>setV({...v,domains:e.target.value})}>{domains.map(d=><option key={d}>{d}</option>)}</select></div>}
-    {mode!=='single'&&<div className="field"><label htmlFor="cert-domains">Domains</label><textarea id="cert-domains" required rows={4} value={v.domains} onChange={e=>setV({...v,domains:e.target.value})} placeholder={'example.com\n*.example.com\nexample.net\n*.example.net'}/><small>{adopt?'Alle vorhandenen SAN-Domains einschließlich Wildcards exakt angeben.':'Pro Zeile eine Domain; Wildcards brauchen DNS-01. Bis zu 30 Domains pro Auftrag.'}</small></div>}
-    {adopt&&<div className="field"><label htmlFor="cert-source">Vorhandener LEGO-Zertifikatsname</label><input id="cert-source" required pattern="[a-zA-Z0-9_.*-]+" value={v.source_name} onChange={e=>setV({...v,source_name:e.target.value})} placeholder="phillipunzen.de"/><small>Name ohne .crt/.pem unter dem lokal konfigurierten LEGO-Pfad. Der Auftrag wird übernommen; dabei wird kein neues Zertifikat angefordert.</small></div>}
-    <div className="field"><label htmlFor="cert-email">Let's-Encrypt-E-Mail</label><input id="cert-email" type="email" required value={v.email} onChange={e=>setV({...v,email:e.target.value})}/></div>
-    {!adopt&&!productionFrom&&<label className="checkbox"><input type="checkbox" checked={v.staging} onChange={e=>setV({...v,staging:e.target.checked})}/>Staging verwenden (Testzertifikat)</label>}
-    <label className="checkbox"><input type="checkbox" checked={v.automatic} onChange={e=>setV({...v,automatic:e.target.checked})}/>Produktionszertifikat automatisch erneuern</label>
-    <div className="notice">{adopt?'Die bestehende Zertifikatsdatei wird mit geprüftem Reload installiert. Den bisherigen Cronjob erst nach erfolgreicher Übernahme und Kontrolle abschalten.':'Mit der Anforderung akzeptierst du die Let’s-Encrypt-Nutzungsbedingungen. Produktionszertifikate werden nach Prüfung installiert; im Proxy Host oder unter Frontends & Backends dem TLS-Listener zuweisen.'}</div>
-    {!available&&<div className="notice error">Unter Server den Agenten aktualisieren, damit LEGO und die DNS-Token-Eingabe verfügbar sind. Bei HTTP zusätzlich den Webroot einrichten. <a href="/api/certificate-guide" target="_blank" rel="noreferrer">Anleitung öffnen</a></div>}
-    <div className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>Abbrechen</button><button type="submit" className="button" disabled={!available}>{busy?<Loader2 size={16} className="spin"/>:<ShieldCheck size={16}/>} {adopt?'LEGO-Auftrag übernehmen':productionFrom?'Produktionszertifikat anfordern':'Zertifikat anfordern'}</button></div>
-  </fieldset></form>;
+  return (
+    <form
+      className="form-body"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!busy) void submit();
+      }}
+    >
+      <fieldset className="imported-form-fields" disabled={busy}>
+        {error && (
+          <div className="notice error" role="alert">
+            {error}
+          </div>
+        )}
+        {productionFrom && (
+          <div className="notice">
+            Produktionsanforderung aus dem Testzertifikat „{productionFrom.name}“. Domains und verfügbare
+            Auftragseinstellungen sind vorbelegt. Das Testzertifikat bleibt erhalten; das neue Zertifikat wird
+            erst beim Absenden ausgestellt.
+          </div>
+        )}
+        {!v.staging && productionNames.includes(v.name) && (
+          <div className="notice error">
+            Auf diesem Server existiert bereits das Produktionszertifikat „{v.name}“. Diese Anforderung
+            ersetzt es nach erfolgreicher Prüfung und lädt HAProxy neu. Für ein zusätzliches Zertifikat einen
+            anderen PEM-Namen wählen.
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="cert-challenge">Challenge</label>
+          <select
+            id="cert-challenge"
+            value={v.challenge}
+            onChange={(e) => {
+              setV({ ...v, challenge: e.target.value, dns_token: '', dns_zone_token: '' });
+              setAccess(adopt && cap?.lego_host_credentials ? 'host' : 'new');
+            }}
+          >
+            <option value="dns">DNS-Challenge · auch für Wildcards</option>
+            <option value="http">HTTP-Challenge · Port 80 / Webroot</option>
+          </select>
+        </div>
+        {v.challenge === 'dns' && (
+          <>
+            <div className="field">
+              <label htmlFor="cert-provider">DNS-Anbieter</label>
+              <select
+                id="cert-provider"
+                value={v.provider}
+                onChange={(e) => {
+                  setV({ ...v, provider: e.target.value, dns_token: '', dns_zone_token: '' });
+                  setAccess('new');
+                }}
+              >
+                <option value="cloudflare">Cloudflare</option>
+                <option value="hetzner">Hetzner Cloud · DNS in der Hetzner Console</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="cert-access">DNS-Zugang auf diesem Server</label>
+              <select
+                id="cert-access"
+                value={access}
+                onChange={(e) => {
+                  setAccess(e.target.value);
+                  setV({ ...v, dns_token: '', dns_zone_token: '' });
+                }}
+              >
+                <option value="new">Neuen API-Token hinterlegen</option>
+                {saved.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label} · gespeicherten Zugang verwenden
+                  </option>
+                ))}
+                {adopt && cap?.lego_host_credentials && (
+                  <option value="host">Vorhandene LEGO-Zugangsdaten auf dem Host verwenden</option>
+                )}
+              </select>
+            </div>
+            {access === 'new' && (
+              <>
+                <div className="field">
+                  <label htmlFor="cert-dns-token">
+                    {v.provider === 'cloudflare' ? 'Cloudflare DNS API-Token' : 'Hetzner Cloud API-Token'}
+                  </label>
+                  <input
+                    id="cert-dns-token"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    required
+                    maxLength={512}
+                    pattern="[a-zA-Z0-9._~\-]+"
+                    value={v.dns_token}
+                    onChange={(e) => setV({ ...v, dns_token: e.target.value })}
+                  />
+                  <small>
+                    {v.provider === 'cloudflare'
+                      ? 'Token mit Zone → DNS → Bearbeiten und Zone → Zone → Lesen für alle angegebenen Domains.'
+                      : 'Projekt-Token mit Lesen & Schreiben aus der Hetzner Console; die DNS-Zonen müssen in diesem Projekt liegen.'}
+                  </small>
+                </div>
+                {v.provider === 'cloudflare' && (
+                  <div className="field">
+                    <label htmlFor="cert-zone-token">Separater Zone API-Token (optional)</label>
+                    <input
+                      id="cert-zone-token"
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      maxLength={512}
+                      pattern="[a-zA-Z0-9._~\-]+"
+                      value={v.dns_zone_token}
+                      onChange={(e) => setV({ ...v, dns_zone_token: e.target.value })}
+                    />
+                    <small>Nur nötig, wenn Zone-Leserechte auf einen zweiten Token aufgeteilt sind.</small>
+                  </div>
+                )}
+              </>
+            )}
+            <p className="stats-note">
+              Zugangsdaten werden geschützt auf dem ausgewählten Agenten gespeichert und bei der Erneuerung
+              wiederverwendet. Andere Server erhalten diesen Zugang nicht. Gespeicherte Tokens werden nicht
+              angezeigt.
+            </p>
+          </>
+        )}
+        {v.challenge === 'http' && (
+          <div className="notice">
+            Jede Domain muss öffentlich auf diesen HAProxy zeigen. Port 80 und die Weiterleitung für
+            /.well-known/acme-challenge/ zum Webroot-Dienst müssen erreichbar sein.{' '}
+            <a href="/api/certificate-guide" target="_blank" rel="noreferrer">
+              HTTP-Einrichtung
+            </a>
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="cert-name">PEM-Name auf diesem Server</label>
+          <input
+            id="cert-name"
+            required
+            pattern="[a-zA-Z0-9_-]+"
+            maxLength={80}
+            value={v.name}
+            onChange={(e) => setV({ ...v, name: e.target.value })}
+            placeholder="example-wildcard"
+          />
+          <small>„cert“ verwendet cert.pem und passt zu einem bestehenden Listener mit dieser Datei.</small>
+        </div>
+        {!adopt && (
+          <div className="field">
+            <label htmlFor="cert-coverage">Umfang</label>
+            <select
+              id="cert-coverage"
+              value={mode}
+              onChange={(e) => {
+                setMode(e.target.value);
+                if (e.target.value === 'all') setV({ ...v, domains: domains.join('\n') });
+                if (e.target.value === 'single') setV({ ...v, domains: domains[0] || '' });
+              }}
+            >
+              <option value="custom">Eigene Domain-Liste / Wildcards</option>
+              <option value="single" disabled={!domains.length}>
+                Einzelne Reverseproxy-Site
+              </option>
+              <option value="all" disabled={!domains.length}>
+                Alle Sites dieses Servers gemeinsam
+              </option>
+            </select>
+          </div>
+        )}
+        {mode === 'single' && (
+          <div className="field">
+            <label htmlFor="cert-site">Reverseproxy-Site</label>
+            <select
+              id="cert-site"
+              value={v.domains}
+              onChange={(e) => setV({ ...v, domains: e.target.value })}
+            >
+              {domains.map((d) => (
+                <option key={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {mode !== 'single' && (
+          <div className="field">
+            <label htmlFor="cert-domains">Domains</label>
+            <textarea
+              id="cert-domains"
+              required
+              rows={4}
+              value={v.domains}
+              onChange={(e) => setV({ ...v, domains: e.target.value })}
+              placeholder={'example.com\n*.example.com\nexample.net\n*.example.net'}
+            />
+            <small>
+              {adopt
+                ? 'Alle vorhandenen SAN-Domains einschließlich Wildcards exakt angeben.'
+                : 'Pro Zeile eine Domain; Wildcards brauchen DNS-01. Bis zu 30 Domains pro Auftrag.'}
+            </small>
+          </div>
+        )}
+        {adopt && (
+          <div className="field">
+            <label htmlFor="cert-source">Vorhandener LEGO-Zertifikatsname</label>
+            <input
+              id="cert-source"
+              required
+              pattern="[a-zA-Z0-9_.*-]+"
+              value={v.source_name}
+              onChange={(e) => setV({ ...v, source_name: e.target.value })}
+              placeholder="phillipunzen.de"
+            />
+            <small>
+              Name ohne .crt/.pem unter dem lokal konfigurierten LEGO-Pfad. Der Auftrag wird übernommen; dabei
+              wird kein neues Zertifikat angefordert.
+            </small>
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="cert-email">Let's-Encrypt-E-Mail</label>
+          <input
+            id="cert-email"
+            type="email"
+            required
+            value={v.email}
+            onChange={(e) => setV({ ...v, email: e.target.value })}
+          />
+        </div>
+        {!adopt && !productionFrom && (
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={v.staging}
+              onChange={(e) => setV({ ...v, staging: e.target.checked })}
+            />
+            Staging verwenden (Testzertifikat)
+          </label>
+        )}
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={v.automatic}
+            onChange={(e) => setV({ ...v, automatic: e.target.checked })}
+          />
+          Produktionszertifikat automatisch erneuern
+        </label>
+        <div className="notice">
+          {adopt
+            ? 'Die bestehende Zertifikatsdatei wird mit geprüftem Reload installiert. Den bisherigen Cronjob erst nach erfolgreicher Übernahme und Kontrolle abschalten.'
+            : 'Mit der Anforderung akzeptierst du die Let’s-Encrypt-Nutzungsbedingungen. Produktionszertifikate werden nach Prüfung installiert; im Proxy Host oder unter Frontends & Backends dem TLS-Listener zuweisen.'}
+        </div>
+        {!available && (
+          <div className="notice error">
+            Unter Server den Agenten aktualisieren, damit LEGO und die DNS-Token-Eingabe verfügbar sind. Bei
+            HTTP zusätzlich den Webroot einrichten.{' '}
+            <a href="/api/certificate-guide" target="_blank" rel="noreferrer">
+              Anleitung öffnen
+            </a>
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="button secondary" onClick={onClose}>
+            Abbrechen
+          </button>
+          <button type="submit" className="button" disabled={!available}>
+            {busy ? <Loader2 size={16} className="spin" /> : <ShieldCheck size={16} />}{' '}
+            {adopt
+              ? 'LEGO-Auftrag übernehmen'
+              : productionFrom
+                ? 'Produktionszertifikat anfordern'
+                : 'Zertifikat anfordern'}
+          </button>
+        </div>
+      </fieldset>
+    </form>
+  );
 }
 
-export function RenewalSettingsForm({initial,busy,onClose,onSave}:{initial:RenewalSettings;busy:boolean;onClose:()=>void;onSave:(v:RenewalSettings)=>Promise<void>}){
-  const [v,setV]=useState(initial),[error,setError]=useState('');
-  return <form className="form-body" onSubmit={async e=>{e.preventDefault();setError('');try{await onSave(v);}catch(e){setError((e as Error).message);}}}><fieldset disabled={busy} className="imported-form-fields">{error&&<div className="notice error" role="alert">{error}</div>}<label className="checkbox"><input type="checkbox" checked={v.enabled} onChange={e=>setV({...v,enabled:e.target.checked})}/>Automatische Erneuerung auf diesem Server aktivieren</label><div className="field"><label htmlFor="renewal-schedule">Prüfzeitplan</label><select id="renewal-schedule" value={v.schedule} onChange={e=>setV({...v,schedule:e.target.value as RenewalSettings['schedule']})}><option value="interval">Alle X Stunden</option><option value="daily">Täglich zu einer Uhrzeit</option></select></div>{v.schedule==='interval'?<div className="field"><label htmlFor="renewal-interval">Intervall in Stunden</label><input id="renewal-interval" required type="number" min={1} max={168} value={v.interval_hours} onChange={e=>setV({...v,interval_hours:Number(e.target.value)})}/></div>:<div className="form-grid"><div className="field"><label htmlFor="renewal-time">Uhrzeit</label><input id="renewal-time" required type="time" value={v.daily_time} onChange={e=>setV({...v,daily_time:e.target.value})}/></div><div className="field"><label htmlFor="renewal-timezone">Zeitzone</label><input id="renewal-timezone" required value={v.timezone} onChange={e=>setV({...v,timezone:e.target.value})}/></div></div>}<p className="stats-note">Der Zeitplan läuft auf dem Agenten auch bei ausgeschaltetem Management-Container. Er prüft nur verwaltete Produktionszertifikate mit aktivierter Automatik. Ein täglicher Auftrag wie 03:15 ersetzt die Zeitsteuerung deines Cronjobs.</p><div className="modal-actions"><button className="button secondary" type="button" onClick={onClose}>Abbrechen</button><button className="button" type="submit"><Check size={16}/>Zeitplan speichern</button></div></fieldset></form>;
+export function RenewalSettingsForm({
+  initial,
+  busy,
+  onClose,
+  onSave,
+}: {
+  initial: RenewalSettings;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (v: RenewalSettings) => Promise<void>;
+}) {
+  const [v, setV] = useState(initial),
+    [error, setError] = useState('');
+  return (
+    <form
+      className="form-body"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+          await onSave(v);
+        } catch (e) {
+          setError((e as Error).message);
+        }
+      }}
+    >
+      <fieldset disabled={busy} className="imported-form-fields">
+        {error && (
+          <div className="notice error" role="alert">
+            {error}
+          </div>
+        )}
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={v.enabled}
+            onChange={(e) => setV({ ...v, enabled: e.target.checked })}
+          />
+          Automatische Erneuerung auf diesem Server aktivieren
+        </label>
+        <div className="field">
+          <label htmlFor="renewal-schedule">Prüfzeitplan</label>
+          <select
+            id="renewal-schedule"
+            value={v.schedule}
+            onChange={(e) => setV({ ...v, schedule: e.target.value as RenewalSettings['schedule'] })}
+          >
+            <option value="interval">Alle X Stunden</option>
+            <option value="daily">Täglich zu einer Uhrzeit</option>
+          </select>
+        </div>
+        {v.schedule === 'interval' ? (
+          <div className="field">
+            <label htmlFor="renewal-interval">Intervall in Stunden</label>
+            <input
+              id="renewal-interval"
+              required
+              type="number"
+              min={1}
+              max={168}
+              value={v.interval_hours}
+              onChange={(e) => setV({ ...v, interval_hours: Number(e.target.value) })}
+            />
+          </div>
+        ) : (
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="renewal-time">Uhrzeit</label>
+              <input
+                id="renewal-time"
+                required
+                type="time"
+                value={v.daily_time}
+                onChange={(e) => setV({ ...v, daily_time: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="renewal-timezone">Zeitzone</label>
+              <input
+                id="renewal-timezone"
+                required
+                value={v.timezone}
+                onChange={(e) => setV({ ...v, timezone: e.target.value })}
+              />
+            </div>
+          </div>
+        )}
+        <p className="stats-note">
+          Der Zeitplan läuft auf dem Agenten auch bei ausgeschaltetem Management-Container. Er prüft nur
+          verwaltete Produktionszertifikate mit aktivierter Automatik. Ein täglicher Auftrag wie 03:15 ersetzt
+          die Zeitsteuerung deines Cronjobs.
+        </p>
+        <div className="modal-actions">
+          <button className="button secondary" type="button" onClick={onClose}>
+            Abbrechen
+          </button>
+          <button className="button" type="submit">
+            <Check size={16} />
+            Zeitplan speichern
+          </button>
+        </div>
+      </fieldset>
+    </form>
+  );
 }
 
-export function CertificatePolicyForm({cert,busy,onClose,onSave}:{cert:Certificate;busy:boolean;onClose:()=>void;onSave:(v:{automatic:boolean})=>Promise<void>}){
-  const [automatic,setAutomatic]=useState(!!cert.automatic),[error,setError]=useState('');
-  return <form className="form-body" onSubmit={async e=>{e.preventDefault();setError('');try{await onSave({automatic});}catch(e){setError((e as Error).message);}}}>{error&&<div className="notice error" role="alert">{error}</div>}<label className="checkbox"><input disabled={busy} type="checkbox" checked={automatic} onChange={e=>setAutomatic(e.target.checked)}/> {cert.name} automatisch erneuern</label><p className="stats-note">Eine manuelle Prüfung bleibt auch bei pausierter Automatik möglich.</p><div className="modal-actions"><button type="button" className="button secondary" disabled={busy} onClick={onClose}>Abbrechen</button><button type="submit" className="button" disabled={busy}>Speichern</button></div></form>;
+export function CertificatePolicyForm({
+  cert,
+  busy,
+  onClose,
+  onSave,
+}: {
+  cert: Certificate;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (v: { automatic: boolean }) => Promise<void>;
+}) {
+  const [automatic, setAutomatic] = useState(!!cert.automatic),
+    [error, setError] = useState('');
+  return (
+    <form
+      className="form-body"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+          await onSave({ automatic });
+        } catch (e) {
+          setError((e as Error).message);
+        }
+      }}
+    >
+      {error && (
+        <div className="notice error" role="alert">
+          {error}
+        </div>
+      )}
+      <label className="checkbox">
+        <input
+          disabled={busy}
+          type="checkbox"
+          checked={automatic}
+          onChange={(e) => setAutomatic(e.target.checked)}
+        />{' '}
+        {cert.name} automatisch erneuern
+      </label>
+      <p className="stats-note">Eine manuelle Prüfung bleibt auch bei pausierter Automatik möglich.</p>
+      <div className="modal-actions">
+        <button type="button" className="button secondary" disabled={busy} onClick={onClose}>
+          Abbrechen
+        </button>
+        <button type="submit" className="button" disabled={busy}>
+          Speichern
+        </button>
+      </div>
+    </form>
+  );
 }
 
-export function CertificateSelector({certs,value,onChange}:{certs:Certificate[];value?:string|null;onChange:(name:string|null)=>void}){
-  return <div className="field"><label htmlFor="site-certificate">Zertifikat für HTTPS</label><select id="site-certificate" value={value||''} onChange={e=>onChange(e.target.value||null)}><option value="">Zertifikate des Frontends verwenden (SNI)</option>{value&&!certs.some(c=>!c.staging&&!c.error&&c.name===value)&&<option value={value}>{value} · nicht verfügbar</option>}{certs.filter(c=>!c.staging&&!c.error).map(c=><option key={c.name} value={c.name}>{c.name} · {c.domains?.join(', ')}</option>)}{certs.filter(c=>c.staging).map(c=><option key={'staging:'+c.name} value={'staging:'+c.name} disabled>{c.name} · Staging-Testzertifikat — zuerst Produktion anfordern</option>)}</select>{certs.some(c=>c.staging)&&<small>Staging-Zertifikate sind nur zum Test der Ausstellung da. Unter Zertifikate → Produktion anfordern ein Produktionszertifikat ausstellen, danach hier auswählen.</small>}<small>Die Auswahl gilt für alle Hostnamen dieses Eintrags. Das Zertifikat muss jeden dieser Namen abdecken und hat Vorrang vor den Standardzertifikaten des Frontends, auch bei überlappenden Domain-Listen. Die Auswahl erfolgt beim TLS-Verbindungsaufbau (SNI); unterschiedliche Zertifikate je URL-Pfad sind deshalb nicht möglich.</small></div>;
+export function CertificateSelector({
+  certs,
+  value,
+  onChange,
+}: {
+  certs: Certificate[];
+  value?: string | null;
+  onChange: (name: string | null) => void;
+}) {
+  return (
+    <div className="field">
+      <label htmlFor="site-certificate">Zertifikat für HTTPS</label>
+      <select id="site-certificate" value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Zertifikate des Frontends verwenden (SNI)</option>
+        {value && !certs.some((c) => !c.staging && !c.error && c.name === value) && (
+          <option value={value}>{value} · nicht verfügbar</option>
+        )}
+        {certs
+          .filter((c) => !c.staging && !c.error)
+          .map((c) => (
+            <option key={c.name} value={c.name}>
+              {c.name} · {c.domains?.join(', ')}
+            </option>
+          ))}
+        {certs
+          .filter((c) => c.staging)
+          .map((c) => (
+            <option key={'staging:' + c.name} value={'staging:' + c.name} disabled>
+              {c.name} · Staging-Testzertifikat — zuerst Produktion anfordern
+            </option>
+          ))}
+      </select>
+      {certs.some((c) => c.staging) && (
+        <small>
+          Staging-Zertifikate sind nur zum Test der Ausstellung da. Unter Zertifikate → Produktion anfordern
+          ein Produktionszertifikat ausstellen, danach hier auswählen.
+        </small>
+      )}
+      <small>
+        Die Auswahl gilt für alle Hostnamen dieses Eintrags. Das Zertifikat muss jeden dieser Namen abdecken
+        und hat Vorrang vor den Standardzertifikaten des Frontends, auch bei überlappenden Domain-Listen. Die
+        Auswahl erfolgt beim TLS-Verbindungsaufbau (SNI); unterschiedliche Zertifikate je URL-Pfad sind
+        deshalb nicht möglich.
+      </small>
+    </div>
+  );
 }

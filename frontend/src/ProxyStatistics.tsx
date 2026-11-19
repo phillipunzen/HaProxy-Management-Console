@@ -1,38 +1,325 @@
 import { useId, useState } from 'react';
 import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 
-export type ProxyRow = Record<string,any>;
-const number=(value:unknown)=>value==null||value===''?'—':new Intl.NumberFormat('de-DE').format(Number(value));
-const traffic=(value:unknown)=>value==null||value===''?'—':Number(value)>1e9?(Number(value)/1e9).toFixed(2)+' GB':Number(value)>1e6?(Number(value)/1e6).toFixed(2)+' MB':number(value)+' B';
-const role=(r:ProxyRow)=>r.role||({'0':'frontend','1':'backend','2':'server','3':'listener'} as Record<string,string>)[r.type]||(r.svname==='FRONTEND'?'frontend':r.svname==='BACKEND'?'backend':'server');
-function Badge({row}:{row:ProxyRow}){return <span className={'badge '+(['UP','OPEN'].includes(row.status)?'green':row.status==='DOWN'?'red':'neutral')}>{row.status||'—'}</span>;}
-function Mode({row}:{row:ProxyRow}){return <><span className={'badge '+(row.mode==='tcp'?'amber':'neutral')}>{row.mode==='http'?'HTTP':row.mode==='tcp'?'TCP':'Modus unbekannt'}</span><small>{row.service||'Betriebsmodus aus der Runtime'}</small></>;}
-function Counters({r}:{r:ProxyRow}){return <><td>{number(r.scur)}<small>{number(r.rate)} Sessions/s</small></td><td>{r.mode==='http'?number(r.req_rate):'—'}</td><td className="mono">{traffic(r.bin)} / {traffic(r.bout)}</td><td>{r.mode==='http'?number(r.hrsp_5xx):'—'}</td></>;}
-
-export function ProxyStatistics({rows,version}:{rows:ProxyRow[];version?:string}){
-  const [search,setSearch]=useState(''),[mode,setMode]=useState('all'),[expandedPools,setExpandedPools]=useState<Record<string,boolean>>({});
-  const needle=search.trim().toLowerCase();
-  const fronts=rows.filter(r=>role(r)==='frontend'),backs=rows.filter(r=>role(r)==='backend'),servers=rows.filter(r=>role(r)==='server');
-  const matches=(r:ProxyRow)=>`${r.pxname} ${r.svname} ${r.addr||''} ${(r.domains||[]).join(' ')}`.toLowerCase().includes(needle)&&(mode==='all'||r.mode===mode);
-  const visibleBacks=backs.filter(b=>matches(b)||servers.some(s=>s.pxname===b.pxname&&matches(s)));
-  const expanded=(b:ProxyRow)=>Object.prototype.hasOwnProperty.call(expandedPools,b.pxname)?expandedPools[b.pxname]:!!needle;
-  const expandable=visibleBacks.filter(b=>servers.some(s=>s.pxname===b.pxname));
-  function expandVisible(value:boolean){setExpandedPools(old=>({...old,...Object.fromEntries(expandable.map(b=>[b.pxname,value]))}));}
-  return <>
-    <div className="proxy-summary"><div><strong>{fronts.length}</strong><span>Frontends · eingehender Traffic</span></div><div><strong>{backs.length}</strong><span>Backend-Pools · Verteilung</span></div><div><strong>{servers.length}</strong><span>Zielserver · Verbindungen</span></div></div>
-    <div className="toolbar proxy-statistics-toolbar"><div className="search"><Search size={16}/><input aria-label="Proxies durchsuchen" placeholder="Proxy, Domain oder Zielserver suchen …" value={search} onChange={e=>{setSearch(e.target.value);setExpandedPools({});}}/></div><select aria-label="Proxy-Protokoll" value={mode} onChange={e=>setMode(e.target.value)}><option value="all">Alle Protokolle</option><option value="http">HTTP / HTTPS</option><option value="tcp">TCP / TLS-Passthrough</option></select><span>{version?'HAProxy '+version:''}</span></div>
-    <section className="panel"><div className="panel-header"><div><h2>Frontends</h2><p>Listener und Anfragen an HAProxy. Ein listen-Abschnitt hat zusätzlich einen Backend-Pool.</p></div><span className="badge">{fronts.filter(matches).length}</span></div><div className="table-wrap"><table><thead><tr><th>FRONTEND / LISTENER</th><th>DIENST / PROTOKOLL</th><th>STATUS</th><th>VERBINDUNGEN</th><th>HTTP-ANFRAGEN/S</th><th>TRAFFIC IN / OUT</th><th>HTTP 5XX</th></tr></thead><tbody>{fronts.filter(matches).map((r,i)=><tr key={i}><td><strong>{r.pxname}</strong>{r.proxy_kind==='listen'&&<small>listen · Frontend und Backend</small>}<small className="mono">{(r.binds||[]).join(' · ')||r.addr||'Listener nicht gemeldet'}</small>{r.domains?.length>0&&<small>{r.domains.join(', ')}</small>}{r.routes?.length>0&&<small>→ {Array.from(new Set(r.routes.map((route:any)=>route.backend.startsWith('%[')?'Dynamische Host-Map':route.backend))).join(', ')}</small>}</td><td><Mode row={r}/></td><td><Badge row={r}/></td><Counters r={r}/></tr>)}</tbody></table></div>{!fronts.filter(matches).length&&<p className="stats-empty">Keine passenden Frontends.</p>}</section>
-    <section className="panel"><div className="panel-header"><div><h2>Backends & Zielserver</h2><p>Pool-Zähler bleiben sichtbar. Einen Backend-Namen anklicken, um Zielserver und Healthchecks aufzuklappen.</p></div><div className="backend-overview-actions"><span className="badge">{visibleBacks.length} Pools</span><button className="text-button" disabled={!expandable.some(b=>!expanded(b))} onClick={()=>expandVisible(true)}>Alle aufklappen</button><button className="text-button" disabled={!expandable.some(expanded)} onClick={()=>expandVisible(false)}>Alle zuklappen</button></div></div><div className="table-wrap"><table><thead><tr><th>BACKEND / ZIELSERVER</th><th>PROTOKOLL</th><th>STATUS</th><th>VERBINDUNGEN</th><th>HTTP-ANFRAGEN/S</th><th>TRAFFIC IN / OUT</th><th>HTTP 5XX</th><th>ANTWORT / HEALTHCHECK</th></tr></thead>{visibleBacks.map(b=><BackendRows key={b.pxname} backend={b} servers={servers.filter(s=>s.pxname===b.pxname)} matches={matches} expanded={expanded(b)} onToggle={()=>setExpandedPools(old=>({...old,[b.pxname]:!expanded(b)}))}/>)}</table></div>{!visibleBacks.length&&<p className="stats-empty">Keine passenden Backend-Pools.</p>}</section>
-    {!rows.length&&<div className="notice">Noch keine Runtime-Zeilen verfügbar. HAProxy-Dienst und Runtime-Socket prüfen.</div>}
-    <p className="stats-note">Die Gesamtwerte oben zählen Frontends. Backend-Pools und deren Zielserver werden nicht nochmals addiert. Ein TCP-Proxy auf Port 443 wird nicht allein wegen der Portnummer als HTTPS eingestuft.</p>
-  </>;
+export type ProxyRow = Record<string, any>;
+const number = (value: unknown) =>
+  value == null || value === '' ? '—' : new Intl.NumberFormat('de-DE').format(Number(value));
+const traffic = (value: unknown) =>
+  value == null || value === ''
+    ? '—'
+    : Number(value) > 1e9
+      ? (Number(value) / 1e9).toFixed(2) + ' GB'
+      : Number(value) > 1e6
+        ? (Number(value) / 1e6).toFixed(2) + ' MB'
+        : number(value) + ' B';
+const role = (r: ProxyRow) =>
+  r.role ||
+  ({ '0': 'frontend', '1': 'backend', '2': 'server', '3': 'listener' } as Record<string, string>)[r.type] ||
+  (r.svname === 'FRONTEND' ? 'frontend' : r.svname === 'BACKEND' ? 'backend' : 'server');
+function Badge({ row }: { row: ProxyRow }) {
+  return (
+    <span
+      className={
+        'badge ' + (['UP', 'OPEN'].includes(row.status) ? 'green' : row.status === 'DOWN' ? 'red' : 'neutral')
+      }
+    >
+      {row.status || '—'}
+    </span>
+  );
 }
-function BackendRows({backend:b,servers,matches,expanded,onToggle}:{backend:ProxyRow;servers:ProxyRow[];matches:(r:ProxyRow)=>boolean;expanded:boolean;onToggle:()=>void}){
-  const detailsId=useId(),visibleServers=servers.filter(r=>matches(b)||matches(r)),down=servers.filter(s=>String(s.status).startsWith('DOWN')).length;
-  return <>
-    <tbody><tr className="backend-pool-row"><td>{servers.length?<button type="button" className="backend-pool-toggle" aria-label={'Backend '+b.pxname+' '+(expanded?'zuklappen':'aufklappen')} aria-expanded={expanded} aria-controls={detailsId} onClick={onToggle}>{expanded?<ChevronDown size={17}/>:<ChevronRight size={17}/>}<strong>{b.pxname}</strong></button>:<strong>{b.pxname}</strong>}<small>{visibleServers.length===servers.length?servers.length:visibleServers.length+' von '+servers.length} Zielserver{down>0&&<span className="red-text"> · {down} DOWN</span>}{b.algo?' · '+b.algo:''}{b.frontends?.length?' · von '+b.frontends.join(', '):''}</small></td><td><Mode row={b}/></td><td><Badge row={b}/></td><Counters r={b}/><td>{b.rtime!==''&&b.rtime!=null?number(b.rtime)+' ms':'—'}</td></tr></tbody>
-    <tbody id={detailsId} hidden={!expanded}>
-      {visibleServers.map(s=><tr key={s.svname} className="backend-server-row"><td><strong>↳ {s.svname}</strong><small className="mono">{s.addr||'Zieladresse nicht gemeldet'}</small><small>Gewicht {number(s.weight)}{s.bck==='1'?' · Backup-Server':''}</small></td><td><span className="badge">{s.mode==='http'?'HTTP':s.mode==='tcp'?'TCP':'Unbekannt'}</span><small>Zielserver</small></td><td><Badge row={s}/></td><Counters r={s}/><td>{s.rtime!==''&&s.rtime!=null?number(s.rtime)+' ms':'—'}<small>{s.check_status||'Kein Healthcheck gemeldet'}{s.check_desc?' · '+s.check_desc:''}</small></td></tr>)}
-    </tbody>
-  </>;
+function Mode({ row }: { row: ProxyRow }) {
+  return (
+    <>
+      <span className={'badge ' + (row.mode === 'tcp' ? 'amber' : 'neutral')}>
+        {row.mode === 'http' ? 'HTTP' : row.mode === 'tcp' ? 'TCP' : 'Modus unbekannt'}
+      </span>
+      <small>{row.service || 'Betriebsmodus aus der Runtime'}</small>
+    </>
+  );
+}
+function Counters({ r }: { r: ProxyRow }) {
+  return (
+    <>
+      <td>
+        {number(r.scur)}
+        <small>{number(r.rate)} Sessions/s</small>
+      </td>
+      <td>{r.mode === 'http' ? number(r.req_rate) : '—'}</td>
+      <td className="mono">
+        {traffic(r.bin)} / {traffic(r.bout)}
+      </td>
+      <td>{r.mode === 'http' ? number(r.hrsp_5xx) : '—'}</td>
+    </>
+  );
+}
+
+export function ProxyStatistics({ rows, version }: { rows: ProxyRow[]; version?: string }) {
+  const [search, setSearch] = useState(''),
+    [mode, setMode] = useState('all'),
+    [expandedPools, setExpandedPools] = useState<Record<string, boolean>>({});
+  const needle = search.trim().toLowerCase();
+  const fronts = rows.filter((r) => role(r) === 'frontend'),
+    backs = rows.filter((r) => role(r) === 'backend'),
+    servers = rows.filter((r) => role(r) === 'server');
+  const matches = (r: ProxyRow) =>
+    `${r.pxname} ${r.svname} ${r.addr || ''} ${(r.domains || []).join(' ')}`.toLowerCase().includes(needle) &&
+    (mode === 'all' || r.mode === mode);
+  const visibleBacks = backs.filter(
+    (b) => matches(b) || servers.some((s) => s.pxname === b.pxname && matches(s)),
+  );
+  const expanded = (b: ProxyRow) =>
+    Object.prototype.hasOwnProperty.call(expandedPools, b.pxname) ? expandedPools[b.pxname] : !!needle;
+  const expandable = visibleBacks.filter((b) => servers.some((s) => s.pxname === b.pxname));
+  function expandVisible(value: boolean) {
+    setExpandedPools((old) => ({ ...old, ...Object.fromEntries(expandable.map((b) => [b.pxname, value])) }));
+  }
+  return (
+    <>
+      <div className="proxy-summary">
+        <div>
+          <strong>{fronts.length}</strong>
+          <span>Frontends · eingehender Traffic</span>
+        </div>
+        <div>
+          <strong>{backs.length}</strong>
+          <span>Backend-Pools · Verteilung</span>
+        </div>
+        <div>
+          <strong>{servers.length}</strong>
+          <span>Zielserver · Verbindungen</span>
+        </div>
+      </div>
+      <div className="toolbar proxy-statistics-toolbar">
+        <div className="search">
+          <Search size={16} />
+          <input
+            aria-label="Proxies durchsuchen"
+            placeholder="Proxy, Domain oder Zielserver suchen …"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setExpandedPools({});
+            }}
+          />
+        </div>
+        <select aria-label="Proxy-Protokoll" value={mode} onChange={(e) => setMode(e.target.value)}>
+          <option value="all">Alle Protokolle</option>
+          <option value="http">HTTP / HTTPS</option>
+          <option value="tcp">TCP / TLS-Passthrough</option>
+        </select>
+        <span>{version ? 'HAProxy ' + version : ''}</span>
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Frontends</h2>
+            <p>Listener und Anfragen an HAProxy. Ein listen-Abschnitt hat zusätzlich einen Backend-Pool.</p>
+          </div>
+          <span className="badge">{fronts.filter(matches).length}</span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>FRONTEND / LISTENER</th>
+                <th>DIENST / PROTOKOLL</th>
+                <th>STATUS</th>
+                <th>VERBINDUNGEN</th>
+                <th>HTTP-ANFRAGEN/S</th>
+                <th>TRAFFIC IN / OUT</th>
+                <th>HTTP 5XX</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fronts.filter(matches).map((r, i) => (
+                <tr key={i}>
+                  <td>
+                    <strong>{r.pxname}</strong>
+                    {r.proxy_kind === 'listen' && <small>listen · Frontend und Backend</small>}
+                    <small className="mono">
+                      {(r.binds || []).join(' · ') || r.addr || 'Listener nicht gemeldet'}
+                    </small>
+                    {r.domains?.length > 0 && <small>{r.domains.join(', ')}</small>}
+                    {r.routes?.length > 0 && (
+                      <small>
+                        →{' '}
+                        {Array.from(
+                          new Set(
+                            r.routes.map((route: any) =>
+                              route.backend.startsWith('%[') ? 'Dynamische Host-Map' : route.backend,
+                            ),
+                          ),
+                        ).join(', ')}
+                      </small>
+                    )}
+                  </td>
+                  <td>
+                    <Mode row={r} />
+                  </td>
+                  <td>
+                    <Badge row={r} />
+                  </td>
+                  <Counters r={r} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!fronts.filter(matches).length && <p className="stats-empty">Keine passenden Frontends.</p>}
+      </section>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Backends & Zielserver</h2>
+            <p>
+              Pool-Zähler bleiben sichtbar. Einen Backend-Namen anklicken, um Zielserver und Healthchecks
+              aufzuklappen.
+            </p>
+          </div>
+          <div className="backend-overview-actions">
+            <span className="badge">{visibleBacks.length} Pools</span>
+            <button
+              className="text-button"
+              disabled={!expandable.some((b) => !expanded(b))}
+              onClick={() => expandVisible(true)}
+            >
+              Alle aufklappen
+            </button>
+            <button
+              className="text-button"
+              disabled={!expandable.some(expanded)}
+              onClick={() => expandVisible(false)}
+            >
+              Alle zuklappen
+            </button>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>BACKEND / ZIELSERVER</th>
+                <th>PROTOKOLL</th>
+                <th>STATUS</th>
+                <th>VERBINDUNGEN</th>
+                <th>HTTP-ANFRAGEN/S</th>
+                <th>TRAFFIC IN / OUT</th>
+                <th>HTTP 5XX</th>
+                <th>ANTWORT / HEALTHCHECK</th>
+              </tr>
+            </thead>
+            {visibleBacks.map((b) => (
+              <BackendRows
+                key={b.pxname}
+                backend={b}
+                servers={servers.filter((s) => s.pxname === b.pxname)}
+                matches={matches}
+                expanded={expanded(b)}
+                onToggle={() => setExpandedPools((old) => ({ ...old, [b.pxname]: !expanded(b) }))}
+              />
+            ))}
+          </table>
+        </div>
+        {!visibleBacks.length && <p className="stats-empty">Keine passenden Backend-Pools.</p>}
+      </section>
+      {!rows.length && (
+        <div className="notice">
+          Noch keine Runtime-Zeilen verfügbar. HAProxy-Dienst und Runtime-Socket prüfen.
+        </div>
+      )}
+      <p className="stats-note">
+        Die Gesamtwerte oben zählen Frontends. Backend-Pools und deren Zielserver werden nicht nochmals
+        addiert. Ein TCP-Proxy auf Port 443 wird nicht allein wegen der Portnummer als HTTPS eingestuft.
+      </p>
+    </>
+  );
+}
+function BackendRows({
+  backend: b,
+  servers,
+  matches,
+  expanded,
+  onToggle,
+}: {
+  backend: ProxyRow;
+  servers: ProxyRow[];
+  matches: (r: ProxyRow) => boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const detailsId = useId(),
+    visibleServers = servers.filter((r) => matches(b) || matches(r)),
+    down = servers.filter((s) => String(s.status).startsWith('DOWN')).length;
+  return (
+    <>
+      <tbody>
+        <tr className="backend-pool-row">
+          <td>
+            {servers.length ? (
+              <button
+                type="button"
+                className="backend-pool-toggle"
+                aria-label={'Backend ' + b.pxname + ' ' + (expanded ? 'zuklappen' : 'aufklappen')}
+                aria-expanded={expanded}
+                aria-controls={detailsId}
+                onClick={onToggle}
+              >
+                {expanded ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
+                <strong>{b.pxname}</strong>
+              </button>
+            ) : (
+              <strong>{b.pxname}</strong>
+            )}
+            <small>
+              {visibleServers.length === servers.length
+                ? servers.length
+                : visibleServers.length + ' von ' + servers.length}{' '}
+              Zielserver{down > 0 && <span className="red-text"> · {down} DOWN</span>}
+              {b.algo ? ' · ' + b.algo : ''}
+              {b.frontends?.length ? ' · von ' + b.frontends.join(', ') : ''}
+            </small>
+          </td>
+          <td>
+            <Mode row={b} />
+          </td>
+          <td>
+            <Badge row={b} />
+          </td>
+          <Counters r={b} />
+          <td>{b.rtime !== '' && b.rtime != null ? number(b.rtime) + ' ms' : '—'}</td>
+        </tr>
+      </tbody>
+      <tbody id={detailsId} hidden={!expanded}>
+        {visibleServers.map((s) => (
+          <tr key={s.svname} className="backend-server-row">
+            <td>
+              <strong>↳ {s.svname}</strong>
+              <small className="mono">{s.addr || 'Zieladresse nicht gemeldet'}</small>
+              <small>
+                Gewicht {number(s.weight)}
+                {s.bck === '1' ? ' · Backup-Server' : ''}
+              </small>
+            </td>
+            <td>
+              <span className="badge">
+                {s.mode === 'http' ? 'HTTP' : s.mode === 'tcp' ? 'TCP' : 'Unbekannt'}
+              </span>
+              <small>Zielserver</small>
+            </td>
+            <td>
+              <Badge row={s} />
+            </td>
+            <Counters r={s} />
+            <td>
+              {s.rtime !== '' && s.rtime != null ? number(s.rtime) + ' ms' : '—'}
+              <small>
+                {s.check_status || 'Kein Healthcheck gemeldet'}
+                {s.check_desc ? ' · ' + s.check_desc : ''}
+              </small>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </>
+  );
 }
