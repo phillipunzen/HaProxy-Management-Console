@@ -25,7 +25,7 @@ files = {
     'docs/INFRASTRUCTURES.md': root / 'docs' / 'INFRASTRUCTURES.md',
     'docs/SERVERS.md': root / 'docs' / 'SERVERS.md',
     'examples/haproxy-existing-compose.yml': root / 'examples' / 'haproxy-existing-compose.yml',
-    'requirements.txt': root / 'requirements.txt',
+    'requirements-agent.txt': root / 'requirements-agent.txt',
     'backend/__init__.py': root / 'backend' / '__init__.py',
     'backend/managed_rules.py': root / 'backend' / 'managed_rules.py',
     'backend/access_control.py': root / 'backend' / 'access_control.py',

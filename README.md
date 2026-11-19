@@ -154,7 +154,7 @@ Code-Aufteilung: `backend/main.py` (App, Middleware, Start), `backend/core.py` (
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install --require-hashes -r requirements.txt -r requirements-dev.txt
+.venv/bin/pip install --require-hashes -r requirements.txt -r requirements-dev.txt   # Python 3.15
 npm ci --prefix frontend
 npm run build --prefix frontend
 .venv/bin/python -m pytest            # alle Tests; Labortests überspringen sich ohne Opt-in
@@ -164,7 +164,7 @@ npm run typecheck --prefix frontend && npm run format:check --prefix frontend &&
 .venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8100
 ```
 
-**Abhängigkeiten:** direkte Pakete in `requirements.in` bzw. `requirements-dev.in` pflegen und mit `pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements.txt requirements.in` (analog für `requirements-dev`) neu erzeugen. Dependabot schlägt wöchentlich Updates für pip, npm, GitHub Actions und das Docker-Basisimage vor; die CI prüft mit `pip-audit` und `npm audit`.
+**Abhängigkeiten:** direkte Pakete in `requirements.in` (Image, Python 3.15), `requirements-dev.in` und `requirements-agent.in` (Agent auf den HAProxy-Hosts, muss mit Python 3.10 installierbar bleiben) pflegen und die Sperrdateien mit Hashes im passenden Container erzeugen, z. B. `docker run --rm -v "$PWD":/src -w /src python:3.10-slim sh -c 'pip install pip-tools && pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements-agent.txt requirements-agent.in'` (für Image und Dev entsprechend mit `python:3.15-slim`). Dependabot schlägt Updates erst 14 Tage nach Veröffentlichung vor; Patch- und Minor-Updates gebündelt, Major-Updates einzeln. Die CI prüft mit `pip-audit`, `npm audit` und installiert den Agent zusätzlich mit Python 3.10.
 
 **Datenbankschema:** Die Anwendung führt beim Start `alembic upgrade head` aus. Bestehende Installationen ohne Migrationshistorie werden einmalig als Basisversion markiert. Nach Änderungen an `backend/db.py` eine Migration erzeugen: `DB_HOST=… alembic revision --autogenerate -m "Beschreibung"` gegen eine Entwicklungsdatenbank, Ergebnis prüfen und mit einchecken. Die CI bricht ab, wenn Modelle und Migrationen auseinanderlaufen (`alembic check`).
 

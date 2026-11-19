@@ -1,12 +1,12 @@
-# Runtime dependencies of the management console and the agent.
+# Runtime dependencies of the management console image (Python 3.15).
 # Edit this file, then regenerate requirements.txt:
-#   pip-compile --generate-hashes --strip-extras -o requirements.txt requirements.in
-fastapi==0.135.1
-uvicorn==0.41.0
-SQLAlchemy==2.0.48
+#   pip-compile --generate-hashes --strip-extras --allow-unsafe -o requirements.txt requirements.in  (inside python:3.15-slim)
+fastapi==0.162.0
+uvicorn==0.54.0
+SQLAlchemy==2.1.8
 alembic==1.20.1
-PyMySQL==1.1.2
+PyMySQL==1.2.3
 cryptography==50.0.2
 argon2-cffi==25.1.0
 httpx==0.28.1
-pydantic-settings==2.16.2
+pydantic-settings==2.16.3  # 2.16.3: security fix in the default secrets source

@@ -1,24 +1,43 @@
+# Updates wait 14 days after a release (supply-chain safety: compromised releases are
+# usually pulled within days). Patch and minor updates are grouped; every major update
+# gets its own pull request so breaking changes can be reviewed one at a time.
+# requirements-agent.txt must stay installable on Python 3.10; the "Agent on oldest host
+# Python" CI job fails if an update breaks that.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     groups:
       python:
         patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     groups:
       frontend:
         patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ['*']
+        update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 14
