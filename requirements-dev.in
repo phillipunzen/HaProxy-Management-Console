@@ -1,7 +1,7 @@
 # Development and CI tools. Regenerate requirements-dev.txt:
 #   pip-compile --generate-hashes --strip-extras -o requirements-dev.txt requirements-dev.in
 -c requirements.txt
-pytest==9.0.2
+pytest==9.2.0
 httpx2==2.16.2
 ruff==0.17.5
 pip-audit==2.10.1
