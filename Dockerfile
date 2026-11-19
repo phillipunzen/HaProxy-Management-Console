@@ -5,12 +5,12 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm test && npm run build
 
-FROM python:3.13-slim-bookworm AS package
+FROM python:3.15-slim-bookworm AS package
 WORKDIR /src
 COPY . .
 RUN python scripts/package-docker.py /package/haproxy-management-docker.zip
 
-FROM python:3.13-slim-bookworm AS app
+FROM python:3.15-slim-bookworm AS app
 ARG VCS_REF=unknown
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="HAProxy Management Console" \
