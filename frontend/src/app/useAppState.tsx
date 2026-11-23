@@ -1,3 +1,4 @@
+import { hostBackend } from '../format';
 import { useEffect, useRef, useState } from 'react';
 import { type AccessProfile } from '../AccessProfiles';
 import { type BasicDirectory } from '../BasicAuth';
@@ -708,7 +709,7 @@ export function useAppState() {
         doc.access_profiles,
         manualAccess.has('*') ||
           manualAccess.has(h.frontend || 'public_http') ||
-          manualAccess.has('backend_' + h.id),
+          manualAccess.has(hostBackend(h)),
       ),
     ]),
   );

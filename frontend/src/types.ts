@@ -43,6 +43,8 @@ export type Host = {
   access_policy?: AccessPolicy | null;
   proxy_options?: string[];
   id: string;
+  /** Readable HAProxy backend name, assigned by the server from domain and path. */
+  name?: string | null;
   frontend?: string;
   certificate?: string | null;
   basic_auth_group?: number | null;

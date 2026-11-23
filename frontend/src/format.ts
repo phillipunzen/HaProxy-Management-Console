@@ -21,3 +21,6 @@ export const uid = () =>
   crypto.randomUUID
     ? crypto.randomUUID().replaceAll('-', '').slice(0, 12)
     : Math.random().toString(36).slice(2, 14);
+
+/** HAProxy backend of a proxy host (legacy hosts without a name keep backend_<id>). */
+export const hostBackend = (h: { id: string; name?: string | null }) => h.name || 'backend_' + h.id;

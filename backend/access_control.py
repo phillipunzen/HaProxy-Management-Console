@@ -9,6 +9,7 @@ import shlex
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from backend.schemas import AccessPolicy, AccessProfile, Host
 from backend.haproxy_config import parse_sections, map_routes
+from backend import naming
 
 PREFIX = '# haproxy-control-access '
 META = PREFIX + 'v1 '
@@ -167,7 +168,7 @@ def bindings(doc):
                         Site(
                             kind=kind,
                             frontend=item.frontend,
-                            backend='backend_' + item.id if kind == 'host' else item.backend,
+                            backend=naming.backend(item) if kind == 'host' else item.backend,
                             domain=domain,
                             path=item.path if kind == 'host' else '/',
                             policy=policy,
@@ -189,7 +190,7 @@ def bindings(doc):
         editable.update(
             (h.frontend, name, h.path) for h in doc.hosts + doc.imported_managed_hosts for name in h.hostnames
         )
-        owned = {'backend_' + h.id for h in doc.imported_managed_hosts} | set(doc.removed_backends)
+        owned = {n for h in doc.imported_managed_hosts for n in naming.owned(h)} | set(doc.removed_backends)
         for site in old['sites']:
             if (
                 site['backend'] in owned
@@ -221,7 +222,9 @@ def restore_document(doc):
                     for s in old['sites']
                     if s['kind'] == kind
                     and s['frontend'] == item.frontend
-                    and s['backend'] == ('backend_' + item.id if kind == 'host' else item.backend)
+                    # A host imported from a legacy config is renamed on validation,
+                    # while the stored metadata still names its backend_<id> pool.
+                    and s['backend'] in (naming.owned(item) if kind == 'host' else {item.backend})
                     and s['path'] == (item.path if kind == 'host' else '/')
                     and s['domain'] in item.hostnames
                 ]

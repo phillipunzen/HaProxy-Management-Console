@@ -108,7 +108,7 @@ def test_domain_redirect_generates_without_backend_and_retains_request_uri(sourc
     section = output.split('frontend ' + name + '\n')[1].split('\nfrontend ')[0].split('\nbackend ')[0]
     assert 'acl rule_move hdr(host),field(1,:) -i a.example.com' in section
     assert 'path_beg /.well-known/acme-challenge/' in section
-    assert 'backend_move' not in output
+    assert 'backend_move' not in output and 'backend a_example_com' not in output
     if source == 'imported':
         assert (
             section.index('http-request deny')

@@ -250,6 +250,8 @@ class Host(BaseModel):
         return validate(value)
 
     id: str = Field(pattern=r'^[a-zA-Z0-9_-]{1,40}$')
+    # Readable HAProxy backend/ACL name, derived from domain and path (backend.naming).
+    name: str | None = Field(default=None, pattern=r'^[a-zA-Z0-9_.-]{1,80}$')
     domain: str = Field(max_length=253)
     aliases: list[str] = Field(default_factory=list, max_length=29)
     path: str = Field(default='/', max_length=300)
@@ -601,9 +603,9 @@ class Document(BaseModel):
         for items in (self.frontends, self.backends):
             if len({v.name for v in items}) != len(items):
                 raise ValueError('Frontend- und Backend-Namen müssen eindeutig sein.')
-        names = (
-            [f.name for f in self.frontends] + [b.name for b in self.backends] + ['backend_' + h.id for h in self.hosts]
-        )
+        from backend import naming
+
+        names = [f.name for f in self.frontends] + [b.name for b in self.backends]
         if len(set(names)) != len(names):
             raise ValueError('Neue Proxy-Namen dürfen nicht mehrfach verwendet werden.')
         if self.imported_config is not None:
@@ -618,9 +620,17 @@ class Document(BaseModel):
                 remove_original_tool_hosts(
                     self.imported_config, self.imported_managed_hosts, [m.model_dump() for m in self.imported_maps]
                 )
-                existing.difference_update('backend_' + h.id for h in self.imported_managed_hosts)
+                for h in self.imported_managed_hosts:
+                    existing.difference_update(naming.owned(h))
         else:
             existing = {'public_http', 'unknown_host', 'acme_webroot'}
+        self.hosts = naming.assign(
+            self.hosts,
+            existing
+            | set(names)
+            | {b.name for b in self.imported_backends}
+            | {r.backend for r in self.imported_routes},
+        )
         if existing & set(names):
             raise ValueError('Proxy-Name existiert bereits: ' + ', '.join(sorted(existing & set(names))))
         routes = [(h.frontend, name, h.path) for h in self.hosts if h.enabled for name in h.hostnames] + [

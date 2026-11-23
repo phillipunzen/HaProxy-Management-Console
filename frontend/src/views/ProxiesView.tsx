@@ -1,3 +1,4 @@
+import { hostBackend } from '../format';
 import { ProxyLayout } from '../ProxyLayout';
 import { type AppProps } from '../app/useAppState';
 
@@ -29,7 +30,7 @@ export function ProxiesView({ app }: AppProps) {
           (b) =>
             doc.imported_config != null ||
             doc.backends?.some((p) => p.name === b.name) ||
-            doc.hosts.some((h) => 'backend_' + h.id === b.name),
+            doc.hosts.some((h) => hostBackend(h) === b.name),
         )
         .map((b) => b.name)}
       layout={layout}
@@ -64,7 +65,7 @@ export function ProxiesView({ app }: AppProps) {
       onEditBackend={(name) => {
         const p = doc.backends?.find((b) => b.name === name),
           old = doc.imported_backends?.find((b) => b.name === name),
-          h = doc.hosts.find((h) => 'backend_' + h.id === name);
+          h = doc.hosts.find((h) => hostBackend(h) === name);
         if (p) {
           setPoolEdit(p);
           setModal('backend');

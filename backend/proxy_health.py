@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from backend.haproxy_config import extract_backends, parse_sections
 from backend.topology import build as topology, number
+from backend import naming
 
 
 def server_signature(server):
@@ -180,8 +181,8 @@ def build(doc, config, maps, data, captured_at=None):
             host.frontend,
             host.hostnames,
             host.path,
-            'backend_' + host.id,
-            {f'srv_{n + 1}': s for n, s in enumerate(host.servers)},
+            naming.backend(host),
+            dict(zip(naming.servers(host), host.servers)),
             host.enabled,
             exclusive=True,
         )

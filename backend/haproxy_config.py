@@ -515,10 +515,13 @@ def import_config(config, active_hash, maps=None, sources=None, map_hashes=None)
                 'restored_document': True,
             },
         }
+    known = known_host_ids(config)
     config = strip_document_metadata(config)
     clean = read_and_strip(config)[1]
-    hosts, _ = recover_tool_hosts(clean, maps)
-    owned = {'backend_' + h.id for h in hosts}
+    hosts, _ = recover_tool_hosts(clean, maps, known)
+    from backend.naming import backend as backend_name
+
+    owned = {backend_name(h) for h in hosts}
     backends, warnings = extract_backends(clean)
     backends = [b for b in backends if b.name not in owned]
     warnings = recall_warnings + warnings
@@ -735,6 +738,49 @@ def remember_document(config, doc):
     return strip_document_metadata(config).rstrip('\r\n') + '\n' + GRAPH_PREFIX + encoded + '\n'
 
 
+def document_payload(values):
+    """Decode the single document metadata line; raises ValueError when it is malformed."""
+    if len(values) != 1 or len(values[0]) > 1400000:
+        raise ValueError()
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(base64.b64decode(values[0], validate=True), 4 * 1024 * 1024 + 1)
+    if len(raw) > 4 * 1024 * 1024 or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError()
+    payload = json.loads(raw)
+    if not isinstance(payload, dict) or set(payload) != {'document', 'fingerprint'}:
+        raise ValueError()
+    if not isinstance(payload['document'], dict) or not re.fullmatch(r'[a-f0-9]{64}', payload['fingerprint']):
+        raise ValueError()
+    return payload
+
+
+def known_host_ids(config):
+    """Readable backend name -> host id from (possibly outdated) document metadata.
+
+    A configuration changed outside the graphical draft is rebuilt from its rules,
+    but generated hosts keep the ids the metadata recorded for their names.
+    """
+    from backend import naming
+
+    values = [line[len(GRAPH_PREFIX) :] for line in config.splitlines() if line.startswith(GRAPH_PREFIX)]
+    if not values:
+        return {}
+    try:
+        document = document_payload(values)['document']
+        hosts = list(document.get('hosts') or []) + list(document.get('imported_managed_hosts') or [])
+        return {
+            h['name']: h['id']
+            for h in hosts
+            if isinstance(h, dict)
+            and isinstance(h.get('name'), str)
+            and isinstance(h.get('id'), str)
+            and naming.NAME.fullmatch(h['name'])
+            and naming.ID.fullmatch(h['id'])
+        }
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError, zlib.error):
+        return {}
+
+
 def recalled_document(config, active_hash, maps, sources, map_hashes):
     from backend.schemas import Document
 
@@ -742,17 +788,7 @@ def recalled_document(config, active_hash, maps, sources, map_hashes):
     if not values:
         return None, []
     try:
-        if len(values) != 1 or len(values[0]) > 1400000:
-            raise ValueError()
-        decoder = zlib.decompressobj()
-        raw = decoder.decompress(base64.b64decode(values[0], validate=True), 4 * 1024 * 1024 + 1)
-        if len(raw) > 4 * 1024 * 1024 or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
-            raise ValueError()
-        payload = json.loads(raw)
-        if not isinstance(payload, dict) or set(payload) != {'document', 'fingerprint'}:
-            raise ValueError()
-        if not isinstance(payload['document'], dict) or not re.fullmatch(r'[a-f0-9]{64}', payload['fingerprint']):
-            raise ValueError()
+        payload = document_payload(values)
         if payload['fingerprint'] != document_fingerprint(config):
             return None, [
                 'Die Konfiguration wurde außerhalb des grafischen Entwurfs geändert. Erkennbare Tool-Hosts werden rekonstruiert; weitere Änderungen bleiben im importierten Text.'
@@ -774,14 +810,22 @@ def recalled_document(config, active_hash, maps, sources, map_hashes):
         ]
 
 
-def recover_tool_hosts(config, maps=None):
-    """Recognize only complete generated host rules and owned backend pools."""
+def recover_tool_hosts(config, maps=None, known=None):
+    """Recognize only complete generated host rules and owned backend pools.
+
+    ``known`` maps readable backend names to the ids of hosts the document already
+    knows; unknown readable hosts get an id derived from their name. Hosts written
+    by older versions (``backend_<id>`` with ``host_<id>``/``path_<id>``) are still
+    recognized.
+    """
+    from backend import naming
     from backend.basic_auth import strip_managed, read_metadata
     from backend.tls_bindings import read as tls_plans
     from backend.schemas import Host, BackendServer
     from backend.generator import host_acl, backend_tls, address
     from backend.proxy_options import option_lines
 
+    config = naming.strip_markers(config)
     original_lines, original_sections = parse_sections(config)
     clean = strip_managed(config)
     lines, sections = parse_sections(clean)
@@ -795,13 +839,21 @@ def recover_tool_hosts(config, maps=None):
         if front.kind not in ('frontend', 'listen') or front.mode != 'http':
             continue
         for _, rule in front.lines:
-            if len(rule) != 5 or rule[0] != 'use_backend' or rule[2] != 'if' or not rule[1].startswith('backend_'):
+            if len(rule) not in (4, 5) or rule[0] != 'use_backend' or rule[2] != 'if':
                 continue
-            id = rule[1][8:]
-            acl = 'host_' + id
-            path_acl = 'path_' + id
-            if rule[3:] != [acl, path_acl] or not re.fullmatch(r'[a-zA-Z0-9_-]{1,40}', id):
-                continue
+            legacy = rule[1].startswith('backend_') and rule[3:] == ['host_' + rule[1][8:], 'path_' + rule[1][8:]]
+            if legacy:
+                id, name = rule[1][8:], None
+                acl, path_acl = 'host_' + id, 'path_' + id
+                if not naming.ID.fullmatch(id):
+                    continue
+            else:
+                name = rule[1]
+                acl, path_acl = name, name + '_path'
+                if rule[3:] not in ([acl], [acl, path_acl]) or not naming.NAME.fullmatch(name):
+                    continue
+                id = (known or {}).get(name) or naming.recovered_id(name)
+            condition = rule[3:]
             pool = pools.get(rule[1])
             section = next((s for s in sections if s.kind == 'backend' and s.name == rule[1]), None)
             if not pool or not section or pool.mode != 'http' or not pool.balance:
@@ -814,6 +866,11 @@ def recover_tool_hosts(config, maps=None):
                     )
                     for s in sections
                     for _, t in s.lines
+                    # Readable host ACLs share the backend name; they are checked below.
+                    if not (
+                        s is front
+                        and (t[:2] == ['acl', acl] or t[:4] == ['http-request', 'redirect', 'scheme', 'https'])
+                    )
                 )
                 != 1
             ):
@@ -822,8 +879,14 @@ def recover_tool_hosts(config, maps=None):
                 continue
             host_rules = [t for _, t in front.lines if t[:2] == ['acl', acl]]
             paths = [t for _, t in front.lines if t[:2] == ['acl', path_acl]]
-            if len(paths) != 1 or len(paths[0]) != 4 or paths[0][2] != 'path_beg':
+            if len(condition) == 1:
+                if paths:
+                    continue
+                path = '/'
+            elif len(paths) != 1 or len(paths[0]) != 4 or paths[0][2] != 'path_beg' or (name and paths[0][3] == '/'):
                 continue
+            else:
+                path = paths[0][3]
             names = []
             for t in host_rules:
                 if t[2:4] == ['hdr(host),field(1,:)', '-i']:
@@ -842,8 +905,7 @@ def recover_tool_hosts(config, maps=None):
                 'code',
                 '301',
                 'if',
-                acl,
-                path_acl,
+                *condition,
                 '!{',
                 'ssl_fc',
                 '}',
@@ -860,10 +922,11 @@ def recover_tool_hosts(config, maps=None):
                 servers = [BackendServer(**s.model_dump(exclude={'name'})) for s in pool.servers]
                 host = Host(
                     id=id,
+                    name=name,
                     frontend=front.name,
                     domain=names[0],
                     aliases=names[1:],
-                    path=paths[0][3],
+                    path=path,
                     force_https=bool(redirects),
                     balance=pool.balance,
                     servers=servers,
@@ -879,9 +942,9 @@ def recover_tool_hosts(config, maps=None):
                 if generated != legacy:
                     continue
                 expected_pool = [['balance', pool.balance]] + [
-                    ['server', 'srv_' + str(i + 1), address(s.address, s.port), 'weight', str(s.weight), 'check']
+                    ['server', server_name, address(s.address, s.port), 'weight', str(s.weight), 'check']
                     + shlex.split(backend_tls(s))
-                    for i, s in enumerate(servers)
+                    for server_name, s in zip(naming.servers(host), servers)
                 ]
                 option_indexes = {i for i, _ in option_lines(lines, section)}
                 actual = [t for i, t in section.lines if t != ['mode', 'http'] and i not in option_indexes]
@@ -933,9 +996,12 @@ def recover_tool_hosts(config, maps=None):
 
 
 def remove_original_tool_hosts(config, hosts, maps=None):
+    from backend.naming import strip_markers
+
+    config = strip_markers(config)
     if not hosts:
         return config
-    recognized, indexes = recover_tool_hosts(config, maps)
+    recognized, indexes = recover_tool_hosts(config, maps, {h.name: h.id for h in hosts if h.name})
     expected = {h.id for h in hosts}
     if {h.id for h in recognized} != expected:
         raise ValueError('Ursprüngliche Tool-Hosts wurden im Text verändert. Konfiguration erneut einlesen.')

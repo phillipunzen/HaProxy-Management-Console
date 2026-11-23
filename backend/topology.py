@@ -252,7 +252,15 @@ def build(config, maps, data):
                         path = values[0][3]
             if domains:
                 for domain in domains:
-                    route(s, index, domain + (path if path and path != '/' else ''), target, condition, domain, path)
+                    route(
+                        s,
+                        index,
+                        domain + (path if path and path != '/' else ''),
+                        target,
+                        condition,
+                        domain,
+                        path or '/',
+                    )
             else:
                 route(
                     s,

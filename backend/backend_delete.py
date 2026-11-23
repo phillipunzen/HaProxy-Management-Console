@@ -4,6 +4,7 @@ import re
 
 from backend.haproxy_config import parse_sections, map_routes, remove_original_tool_hosts
 from backend.schemas import Document
+from backend import naming
 
 
 def dependencies(config, names, maps=()):
@@ -95,7 +96,7 @@ def plan(doc, name):
     if len(raw) > 1:
         raise ValueError('Mehrere gleichnamige Pools: Namen zuerst im Texteditor bereinigen.')
     own = next((b for b in doc.backends if b.name == name), None)
-    host = next((h for h in doc.hosts if 'backend_' + h.id == name), None)
+    host = next((h for h in doc.hosts if naming.backend(h) == name), None)
     if not raw and not own and not host:
         raise ValueError('Backend-Pool wurde nicht gefunden oder wird automatisch als System-Pool verwaltet.')
     refs = dependencies(original, {name}, [m.model_dump() for m in doc.imported_maps]) if original else []
@@ -103,7 +104,7 @@ def plan(doc, name):
     fronts = {name} if listen else set()
     fronts.update(f.name for f in doc.frontends if f.backend == name and f.mode == 'tcp')
     routes = [r for r in doc.imported_routes if r.backend == name or r.frontend in fronts]
-    hosts = [h for h in doc.hosts if 'backend_' + h.id == name or h.frontend in fronts]
+    hosts = [h for h in doc.hosts if naming.backend(h) == name or h.frontend in fronts]
     for f in doc.frontends:
         if f.backend == name:
             refs.append(f'{f.name}: default_backend {name}')

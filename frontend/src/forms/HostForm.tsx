@@ -8,7 +8,7 @@ import { HostnameAliases } from '../Hostnames';
 import { type Layout } from '../ProxyLayout';
 import { ProxyOptions } from '../ProxyOptions';
 import { Button, Field, Modal } from '../components/ui';
-import { uid } from '../format';
+import { hostBackend, uid } from '../format';
 import { type Host, type Doc, type Cert } from '../types';
 
 /** True if a certificate's domains cover the host name (exact or single-level wildcard). */
@@ -265,7 +265,11 @@ export function HostForm({
           <div className="form-grid">
             <Field
               label="HTTP-Frontend"
-              hint={'Backend-Pool backend_' + v.id + ' wird automatisch angelegt.'}
+              hint={
+                v.name
+                  ? 'Backend-Pool ' + v.name + ' wird automatisch angelegt.'
+                  : 'Der Backend-Pool wird automatisch angelegt und nach der Domain benannt.'
+              }
             >
               <select
                 required
@@ -314,7 +318,7 @@ export function HostForm({
             manual={
               manualSections.has('*') ||
               manualSections.has(v.frontend || 'public_http') ||
-              manualSections.has('backend_' + v.id)
+              manualSections.has(hostBackend(v))
             }
             value={v}
             profiles={profileDrafts}
