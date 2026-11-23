@@ -111,14 +111,18 @@ def enhance(config, doc, cap):
         else:
             additions += ['    http-request return status 404 if !{ hdr(host) -m found }']
     if doc.imported_config is not None:
+        from backend.generator import host_backend
+        from backend.naming import backend as backend_name
+
         for host in doc.hosts:
             if not host.enabled:
                 continue
-            name = 'backend_' + host.id
+            name = backend_name(host)
             if name in names:
                 raise ValueError('Proxy-Host-Backend existiert bereits: ' + name)
             names.add(name)
-            additions += [''] + backend(name, 'http', host.balance, host.servers, host.proxy_options)
+            # Imported defaults may use TCP, so the mode stays explicit here.
+            additions += [''] + host_backend(host)
     if additions:
         config = config.rstrip() + '\n' + '\n'.join(additions) + '\n'
     lines, sections = parse_sections(config)
@@ -152,7 +156,8 @@ def enhance(config, doc, cap):
                         if any(f.name in (old_name, section.name) for f in doc.frontends):
                             raise ValueError(f'Port {port} ist bereits durch {old_name} belegt.')
                 seen.setdefault(port, []).append((addr, section.name))
-    from backend.generator import host_acl, host_order
+    from backend.generator import host_order, route, site_rules
+    from backend.naming import acls
 
     hosts = sorted((h for h in doc.hosts if h.enabled), key=host_order)
     for host in hosts:
@@ -165,14 +170,14 @@ def enhance(config, doc, cap):
         # The legacy shared listener already contains its hosts and backends.
         if doc.imported_config is None and host.frontend == 'public_http':
             continue
-        entries = host_acl(host) + [f'    acl path_{host.id} path_beg {host.path}']
-        if any(re.search(r'\bacl\s+(?:host_|path_)' + re.escape(host.id) + r'\b', line) for line in lines):
-            raise ValueError('Proxy-Host-ACL existiert bereits: ' + host.id)
-        if host.force_https:
-            entries += [
-                f'    http-request redirect scheme https code 301 if host_{host.id} path_{host.id} !{{ ssl_fc }}'
-            ]
-        entries += [f'    use_backend backend_{host.id} if host_{host.id} path_{host.id}']
+        taken = [
+            name
+            for name in acls(host)
+            if any(re.search(r'\bacl\s+' + re.escape(name) + r'(?![a-zA-Z0-9_.:-])', line) for line in lines)
+        ]
+        if taken:
+            raise ValueError('Proxy-Host-ACL existiert bereits: ' + ', '.join(taken))
+        entries = site_rules(host) + [route(host)]
         index = next((i for i, t in front.lines if t[0] in ('use_backend', 'default_backend')), front.end)
         insert.setdefault(index, []).extend(entries)
     plans = []

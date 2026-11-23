@@ -18,8 +18,8 @@ def test_specific_paths_precede_catch_all_and_ipv6_is_bracketed():
         ]
     )
     s = generate(d, CAP)
-    assert s.index('use_backend backend_api') < s.index('use_backend backend_app')
-    assert 'server srv_1 [::1]:9000' in s
+    assert s.index('use_backend app_example_com_api') < s.index('use_backend app_example_com ')
+    assert 'server app_1 [::1]:9000' in s
 
 
 @pytest.mark.parametrize('address', ['host\nfrontend injected', '10.0.0.1 #', '$(id)', 'x;id'])
@@ -46,7 +46,7 @@ def test_acme_excluded_from_redirects_and_denies():
     )
     assert 'http-request deny if rule_deny !acme_challenge' in s
     assert '!{ ssl_fc } !acme_challenge' in s
-    assert s.index('use_backend acme_webroot') < s.index('use_backend backend_app')
+    assert s.index('use_backend acme_webroot') < s.index('use_backend app_example_com')
 
 
 def test_http_wildcard_and_missing_tls_rejected():
@@ -108,7 +108,7 @@ def test_first_distribution_survives_generation_and_document_reimport(kind):
                 Host(id='app', domain='app.example.com', aliases=['www.example.com'], balance='first', servers=servers)
             ]
         )
-        name = 'backend_app'
+        name, prefix = 'app_example_com', 'app'
     else:
         original = Document(
             backends=[
@@ -117,11 +117,11 @@ def test_first_distribution_survives_generation_and_document_reimport(kind):
                 )
             ]
         )
-        name = 'web'
+        name, prefix = 'web', 'srv'
     config = generate(original, CAP)
     section = config.split('backend ' + name + '\n')[1]
     assert '    balance first\n' in section
-    assert section.index('server srv_1 192.0.2.1:80') < section.index('server srv_2 192.0.2.2:80')
+    assert section.index(f'server {prefix}_1 192.0.2.1:80') < section.index(f'server {prefix}_2 192.0.2.2:80')
     restored = Document.model_validate(import_config(config, 'a' * 64)['document'])
     assert restored.hosts == original.hosts and restored.backends == original.backends
     assert '    balance first\n' in generate(restored, CAP)
@@ -133,10 +133,10 @@ def test_custom_http_frontend_automatically_routes_host_to_its_pool():
     )
     config = generate(doc, CAP)
     section = config.split('frontend fe_apps')[1]
-    assert 'use_backend backend_app if host_app path_app' in section
-    assert config.count('backend backend_app\n') == 1
+    assert 'use_backend app_example_com if app_example_com\n' in section
+    assert config.count('backend app_example_com\n') == 1
     shared = config.split('frontend public_http')[1].split('backend unknown_host')[0]
-    assert 'host_app' not in shared
+    assert 'app_example_com' not in shared
 
 
 def imported_with_tls():
@@ -156,8 +156,8 @@ def test_imported_reverseproxy_addition_retains_existing_tls_and_tcp():
     assert 'ssl alpn h2,http/1.1 crt-list ' + plan['path'] in config
     assert 'http-request set-header X-Forwarded-Proto https' in config
     assert 'server db 192.0.2.235:3306 check' in config
-    assert config.index('use_backend backend_app') < config.index('default_backend be_old')
-    assert 'backend backend_app' in config and "http-request auth realm 'Private'" in config
+    assert config.index('use_backend app_example_com') < config.index('default_backend be_old')
+    assert 'backend app_example_com' in config and "http-request auth realm 'Private'" in config
 
 
 def test_explicit_frontend_certificate_selection_replaces_old_binding():
@@ -233,11 +233,12 @@ def test_multiple_names_route_once_to_one_pool(frontend):
         doc.frontends = [ManagedFrontend(name=frontend, port=8081)]
     doc.hosts = [host(frontend=frontend, aliases=['WWW.EXAMPLE.COM', '*.alternate.example.com'], path='/wiki')]
     config = generate(doc, CAP)
-    assert 'acl host_app hdr(host),field(1,:) -i app.example.com www.example.com' in config
-    assert 'acl host_app hdr(host),field(1,:) -m end -i .alternate.example.com' in config
-    assert config.count('use_backend backend_app if host_app path_app') == 1
-    assert config.splitlines().count('backend backend_app') == 1
-    assert 'acl path_app path_beg /wiki' in config
+    name = 'app_example_com_wiki'
+    assert f'acl {name} hdr(host),field(1,:) -i app.example.com www.example.com' in config
+    assert f'acl {name} hdr(host),field(1,:) -m end -i .alternate.example.com' in config
+    assert config.count(f'use_backend {name} if {name} {name}_path') == 1
+    assert config.splitlines().count(f'backend {name}') == 1
+    assert f'acl {name}_path path_beg /wiki' in config
 
 
 @pytest.mark.parametrize(
@@ -298,7 +299,8 @@ def test_backend_certificate_verification_is_per_target_and_sni_is_retained(sour
             )
         ]
     config = generate(doc, CAP)
-    line = next(line for line in config.splitlines() if 'server srv_1 origin.example.com' in line)
+    prefix = 'srv' if source == 'pool' else 'app'
+    line = next(line for line in config.splitlines() if f'server {prefix}_1 origin.example.com' in line)
     assert 'sni str(origin.example.com)' in line
     if verify:
         assert (
@@ -307,6 +309,6 @@ def test_backend_certificate_verification_is_per_target_and_sni_is_retained(sour
         )
     else:
         assert 'ssl verify none' in line and 'ca-file' not in line and 'verifyhost' not in line
-    line = next(line for line in config.splitlines() if 'server srv_2 192.0.2.1' in line)
+    line = next(line for line in config.splitlines() if f'server {prefix}_2 192.0.2.1' in line)
     assert ' ssl ' not in line and 'verify' not in line
     assert BackendServer(address='origin.example.com', tls=True).tls_verify is True

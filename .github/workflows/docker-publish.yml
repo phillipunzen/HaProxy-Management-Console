@@ -95,11 +95,28 @@ jobs:
           cache-dependency-path: requirements*.txt
       - name: Install HAProxy 3.2 and test images
         run: |
-          sudo add-apt-repository -y ppa:vbernat/haproxy-3.2
-          sudo apt-get install -y --no-install-recommends haproxy=3.2.*
-          sudo systemctl disable --now haproxy
           docker pull haproxy:3.2.25
           docker pull haproxy:3.2-alpine
+          if sudo add-apt-repository -y ppa:vbernat/haproxy-3.2 \
+            && sudo apt-get install -y --no-install-recommends haproxy=3.2.*; then
+            sudo systemctl disable --now haproxy
+          else
+            # Launchpad is sometimes unavailable (503); use the binary of the official image instead.
+            echo "::warning::HAProxy PPA unavailable, using the binary from haproxy:3.2.25"
+            # The image is built on Debian with OpenSSL 3.5; its libraries need glibc <= 2.38
+            # and are kept apart from the system ones.
+            container=$(docker create haproxy:3.2.25)
+            sudo mkdir -p /opt/haproxy-ci/lib
+            sudo docker cp "$container":/usr/local/sbin/haproxy /opt/haproxy-ci/haproxy
+            for lib in libssl.so.3 libcrypto.so.3 liblua5.4.so.0 libpcre2-8.so.0 libzstd.so.1 libz.so.1 libcrypt.so.1; do
+              sudo docker cp -L "$container":/lib/x86_64-linux-gnu/$lib /opt/haproxy-ci/lib/
+            done
+            docker rm "$container"
+            printf '#!/bin/sh\nLD_LIBRARY_PATH=/opt/haproxy-ci/lib exec /opt/haproxy-ci/haproxy "$@"\n' \
+              | sudo tee /usr/sbin/haproxy >/dev/null
+            sudo chmod 755 /usr/sbin/haproxy
+          fi
+          /usr/sbin/haproxy -v
       - name: Install dependencies
         run: python -m pip install --require-hashes -r requirements.txt -r requirements-dev.txt
       - name: Run runtime tests against real HAProxy processes

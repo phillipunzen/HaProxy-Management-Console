@@ -144,7 +144,7 @@ def test_combined_listen_deletes_listener_and_its_routes_hosts_and_cert_assignme
         'other.example.com',
     ]
     assert not changed.hosts and not changed.imported_routes and not changed.frontend_certificates
-    assert 'listen incoming' not in output and 'backend_extra' not in names(output)
+    assert 'listen incoming' not in output and 'extra_example_com' not in names(output)
     assert names(output) == {'web', 'other', 'db'}
 
 
@@ -176,9 +176,10 @@ def test_automatic_host_backend_deletion_preserves_other_hosts_identity(import_f
     )
     if import_first:
         doc = imported(generate(doc, CAP))
-    changed, summary = plan(doc, 'backend_app')
+    changed, summary = plan(doc, 'app_example_com')
     output = generate(changed, CAP)
-    assert summary['domains'] == ['app.example.com'] and 'backend_app' not in names(output)
+    assert summary['domains'] == ['app.example.com']
+    assert names(output) == {'unknown_host', 'other_example_com'}
     again = imported(output)
     assert [h.id for h in again.hosts] == ['other']
 

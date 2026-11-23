@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from backend import main
+from backend import main, naming
 from backend.db import Base, Instance, User
 from backend.schemas import Document
 from agent import main as agent
@@ -487,7 +487,7 @@ def test_repeated_apply_keeps_graphical_hosts_auth_tls_and_updates_all_hashes(sy
         )
         next_config = c.post('/api/instances/1/generate', json={})
         assert next_config.status_code == 200, next_config.text
-        assert next_config.json()['config'].splitlines().count('backend backend_newsite') == 1
+        assert next_config.json()['config'].splitlines().count('backend new_example_com') == 1
         assert next_config.json()['config'].splitlines().count('frontend new_tcp') == 1
     with factory() as db:
         assert db.get(Instance, 2).document_version == 0
@@ -693,6 +693,7 @@ def test_repeated_import_and_apply_keeps_created_hosts_and_live_provenance(sync_
     assert c.put('/api/instances/1/document', json=doc).status_code == 200
     result, _, _ = apply_generated(c)
     assert result.status_code == 200 and result.json()['document_synced']
+    name = 'new_example_com_wiki'
     if legacy:
         state['active'] = strip_document_metadata(state['active'])
     for port in (8443, 9443):
@@ -707,7 +708,9 @@ def test_repeated_import_and_apply_keeps_created_hosts_and_live_provenance(sync_
         )
         assert result.status_code == 200, result.text
         imported = result.json()
-        assert imported['hosts'][0]['id'] == 'wiki'
+        # Without metadata a readable host's id is derived from its backend name.
+        assert imported['hosts'][0]['id'] == (naming.recovered_id(name) if legacy else 'wiki')
+        assert imported['hosts'][0]['name'] == name
         assert imported['hosts'][0]['certificate'] == 'site' and imported['hosts'][0]['basic_auth_group'] == 1
         assert (
             imported['hosts'][0]['aliases'] == ['www.new.example.com']
@@ -718,7 +721,7 @@ def test_repeated_import_and_apply_keeps_created_hosts_and_live_provenance(sync_
         result, generated, _ = apply_generated(c)
         assert result.status_code == 200, result.text
         assert result.json()['document_synced'] and '192.0.2.70:' + str(port) in generated['config']
-        assert generated['config'].splitlines().count('backend backend_wiki') == 1
+        assert generated['config'].splitlines().count(f'backend {name}') == 1
     with factory() as db:
         assert db.get(Instance, 2).document_version == 0
 

@@ -75,15 +75,17 @@ def test_options_only_apply_to_own_host_backend_and_survive_reimport(new_front):
         first.frontend = 'incoming'
     text = generate(doc, CAP)
     assert text.count('http-request set-path /reset-password%[path]') == 1
-    section = backend_text(text, 'backend_site')
+    section = backend_text(text, 'app_example_com')
     assert all('    ' + line + '\n' in section for line in OPTIONS)
-    assert 'mode http' in section and first.proxy_options == OPTIONS
+    # The redundant option is dropped; generated defaults already set mode http.
+    assert 'mode http' not in section and first.proxy_options == OPTIONS
+    assert 'defaults\n    mode http\n' in text
     again = imported(text)
     assert again.hosts[0].proxy_options == OPTIONS
     again.hosts[0].proxy_options = []
     clean = generate(again, CAP)
     assert not any(line in clean for line in OPTIONS)
-    assert clean.count('backend backend_site\n') == 1
+    assert clean.count('backend app_example_com\n') == 1
 
 
 def test_legacy_generated_host_with_supported_custom_options_stays_editable():
@@ -176,10 +178,10 @@ def test_central_authentication_runs_before_custom_header_and_path_changes():
     config = generate(
         doc, CAP, {1: {'id': 1, 'realm': 'Members', 'users': [{'username': 'member', 'hash': '$6$unused'}]}}
     )
-    backend = backend_text(config, 'backend_site')
+    backend = backend_text(config, 'app_example_com')
     assert backend.index('http-request auth') < backend.index('http-request set-path')
     assert not any('Authorization' in line for line in imported(config).hosts[0].proxy_options)
-    assert basic_auth.bindings(doc)[0]['backend'] == 'backend_site'
+    assert basic_auth.bindings(doc)[0]['backend'] == 'app_example_com'
 
 
 @pytest.mark.parametrize(
@@ -271,7 +273,7 @@ def test_host_redirect_survives_reimport_and_can_be_removed(metadata):
     doc = imported(text)
     assert doc.hosts[0].proxy_options == [REDIRECT]
     doc.hosts[0].proxy_options = []
-    assert REDIRECT not in backend_text(generate(doc, CAP), 'backend_site')
+    assert REDIRECT not in backend_text(generate(doc, CAP), 'app_example_com')
 
 
 def test_imported_redirect_edit_and_removal_preserve_auth_and_shared_backend():

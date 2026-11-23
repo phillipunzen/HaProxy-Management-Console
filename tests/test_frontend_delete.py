@@ -142,8 +142,10 @@ def test_shared_public_http_deletion_survives_roundtrip_and_other_hosts_stay_man
         doc = imported(generate(doc, CAP))
     changed, summary = plan(doc, 'public_http')
     output = generate(changed, CAP)
-    assert summary['domains'] == ['a.example.com'] and fronts(output) == {'other'} and 'backend_a' not in pools(output)
-    assert 'backend_b' in pools(output) and [h.id for h in changed.hosts] == ['b']
+    assert (
+        summary['domains'] == ['a.example.com'] and fronts(output) == {'other'} and 'a_example_com' not in pools(output)
+    )
+    assert 'b_example_com' in pools(output) and [h.id for h in changed.hosts] == ['b']
     again = imported(output)
     assert fronts(generate(again, CAP)) == {'other'} and [h.id for h in again.hosts] == ['b']
     if not import_first:

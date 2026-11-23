@@ -117,9 +117,9 @@ def test_generated_policy_is_scoped_to_selected_backend_and_removes_credentials(
     doc = protected_doc()
     doc.hosts.append(Host(id='public', domain='public.example.com', servers=[{'address': '192.0.2.2'}]))
     config = generate(doc, CAP, {1: group()})
-    protected = config.split('backend backend_private\n', 1)[1].split('backend backend_public')[0]
+    protected = config.split('backend private_example_com\n', 1)[1].split('backend public_example_com')[0]
     assert 'http-request auth realm' in protected and 'http-request del-header Authorization' in protected
-    assert 'http-request auth' not in config.split('backend backend_public\n', 1)[1].split(auth.META)[0]
+    assert 'http-request auth' not in config.split('backend public_example_com\n', 1)[1].split(auth.META)[0]
     assert PASSWORD not in config and 'insecure-password' not in config
     assert auth.read_metadata(config)['sites'][0]['domain'] == 'private.example.com'
 

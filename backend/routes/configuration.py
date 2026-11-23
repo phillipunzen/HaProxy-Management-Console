@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter
 from backend import core
 from backend.core import AgentUpdateRequired, SETUP_ROOT, audit, current_user, instance, operator, validate_document
+from backend import naming
 
 router = APIRouter()
 
@@ -262,7 +263,7 @@ def proxy_layout(id: int, user=Depends(current_user), db=Depends(get_db)):
             config += '\n' + '\n'.join(pool_config(pool.name, pool.mode, pool.balance, pool.servers)) + '\n'
         for host in doc.hosts:
             if host.enabled:
-                config += '\n' + '\n'.join(pool_config('backend_' + host.id, 'http', host.balance, host.servers)) + '\n'
+                config += '\n' + '\n'.join(pool_config(naming.backend(host), 'http', host.balance, host.servers)) + '\n'
         for front in doc.frontends:
             config += (
                 f'\nfrontend {front.name}\n    mode {front.mode}\n    bind {endpoint(front.bind_address, front.port)}'

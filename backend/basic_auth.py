@@ -13,6 +13,7 @@ import threading
 from sqlalchemy import select
 from backend.haproxy_config import parse_sections, map_routes
 from backend.schemas import DOMAIN, Host
+from backend import naming
 
 PREFIX = '# haproxy-control-basic-auth '
 META = PREFIX + 'v1 '
@@ -68,7 +69,7 @@ def bindings(doc):
         {
             'kind': 'host',
             'frontend': h.frontend,
-            'backend': 'backend_' + h.id,
+            'backend': naming.backend(h),
             'domain': name,
             'path': h.path,
             'group': h.basic_auth_group,
@@ -106,7 +107,7 @@ def bindings(doc):
             editable = {(r.frontend, name) for r in editable for name in r.hostnames}
             # Uneditable pre-existing managed sites remain protected, including
             # native path hosts that the conservative import cannot yet edit.
-            owned = {'backend_' + h.id for h in doc.imported_managed_hosts} | set(doc.removed_backends)
+            owned = {n for h in doc.imported_managed_hosts for n in naming.owned(h)} | set(doc.removed_backends)
             result += [
                 s
                 for s in old['sites']
@@ -492,7 +493,7 @@ def validate_document(db, doc):
         backs = {s.name: s.mode for s in sections if s.kind in ('backend', 'listen')}
         fronts.update({f.name: f.mode for f in doc.frontends})
         backs.update({b.name: b.mode for b in doc.backends})
-        backs.update({'backend_' + h.id: 'http' for h in doc.hosts if h.enabled})
+        backs.update({naming.backend(h): 'http' for h in doc.hosts if h.enabled})
         if any(fronts.get(s['frontend']) != 'http' or backs.get(s['backend']) != 'http' for s in bindings(doc)):
             raise ValueError('Basic Auth ist nur für HTTP-Sites verfügbar, nicht für TCP-Passthrough.')
 

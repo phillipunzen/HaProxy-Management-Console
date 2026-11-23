@@ -4,7 +4,7 @@ import base64
 import json
 
 import pytest
-from backend import access_control as access, basic_auth
+from backend import access_control as access, basic_auth, naming
 from backend.backend_delete import plan
 from backend.generator import generate
 from backend.haproxy_config import import_config, strip_document_metadata, parse_sections
@@ -133,12 +133,20 @@ def test_imported_shared_pool_keeps_per_domain_policy_and_can_clear_after_import
     assert 'use_backend web' in cleared and 'use_backend other' in cleared
 
 
-def test_legacy_tool_hosts_retain_policy_and_identity_when_graph_metadata_removed():
+@pytest.mark.parametrize('legacy', [False, True])
+def test_legacy_tool_hosts_retain_policy_and_identity_when_graph_metadata_removed(legacy, request):
+    if legacy:
+        request.getfixturevalue('legacy_names')
     doc = Document(hosts=[host(access_policy=POLICY)])
     config = strip_document_metadata(generate(doc, CAP))
+    assert ('backend backend_app\n' in config) is legacy
+    if legacy:
+        request.getfixturevalue('monkeypatch').undo()
     again = imported(config)
-    assert [h.id for h in again.hosts] == ['app'] and again.hosts[0].access_policy == doc.hosts[0].access_policy
-    assert [h.id for h in again.imported_managed_hosts] == ['app']
+    # Without document metadata a readable host's id is derived from its backend name.
+    expected = 'app' if legacy else naming.recovered_id('app_example_com')
+    assert [h.id for h in again.hosts] == [expected] and again.hosts[0].access_policy == doc.hosts[0].access_policy
+    assert [h.id for h in again.imported_managed_hosts] == [expected]
     again.hosts[0].access_policy = None
     assert access.read(generate(again, CAP)) is None
 
@@ -200,7 +208,7 @@ def test_ip_policies_do_not_resurrect_after_backend_or_host_deletion():
     output = generate(changed, CAP)
     assert access.read(output) is None and 'deny_status 403' not in output
     doc = imported(strip_document_metadata(generate(Document(hosts=[host(access_policy=POLICY)]), CAP)))
-    changed, _ = plan(doc, 'backend_app')
+    changed, _ = plan(doc, 'app_example_com')
     assert access.read(generate(changed, CAP)) is None
 
 

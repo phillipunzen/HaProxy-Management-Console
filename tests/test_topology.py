@@ -262,5 +262,5 @@ def test_exact_and_wildcard_aliases_are_all_visible_in_shared_backend_topology()
     g = graph(generate(doc, {'runtime_socket_config': '/run/admin.sock', 'cert_dir_config': '/etc/certs'}), [])
     sites = [n for n in nodes(g, 'route') if n.get('domain')]
     assert {n['domain'] for n in sites} == set(doc.hosts[0].hostnames)
-    assert {targets(g, n)[0]['name'] for n in sites} == {'backend_wiki'}
+    assert {targets(g, n)[0]['name'] for n in sites} == {'pc_wiki_de'}
     assert all(n['metrics'] == {} for n in sites)

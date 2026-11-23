@@ -1,3 +1,4 @@
+from backend.naming import MARKER
 from backend.schemas import Document
 
 
@@ -17,14 +18,67 @@ def backend_tls(server):
 
 
 def host_acl(host):
+    from backend.naming import acls
+
+    name = acls(host)[0]
     result = []
     exact = [name for name in host.hostnames if not name.startswith('*.')]
     wildcard = [name[1:] for name in host.hostnames if name.startswith('*.')]
     if exact:
-        result.append(f'    acl host_{host.id} hdr(host),field(1,:) -i ' + ' '.join(exact))
+        result.append(f'    acl {name} hdr(host),field(1,:) -i ' + ' '.join(exact))
     if wildcard:
-        result.append(f'    acl host_{host.id} hdr(host),field(1,:) -m end -i ' + ' '.join(wildcard))
+        result.append(f'    acl {name} hdr(host),field(1,:) -m end -i ' + ' '.join(wildcard))
     return result
+
+
+def path_acl(host):
+    """The path ACL; readable hosts on ``/`` match every path and need none."""
+    from backend.naming import acls, condition
+
+    return [f'    acl {acls(host)[1]} path_beg {host.path}'] if len(condition(host)) == 2 else []
+
+
+def site_rules(host, acme=False):
+    """Comment, ACLs and HTTPS redirect of one host, in frontend order."""
+    from backend.naming import condition, site_comment
+
+    entries = ([f'    {site_comment(host)}'] if host.name else []) + host_acl(host) + path_acl(host)
+    if host.force_https:
+        entries.append(
+            '    http-request redirect scheme https code 301 if '
+            + ' '.join(condition(host))
+            + ' !{ ssl_fc }'
+            + (' !acme_challenge' if acme else '')
+        )
+    return entries
+
+
+def route(host):
+    from backend.naming import backend, condition
+
+    return f'    use_backend {backend(host)} if ' + ' '.join(condition(host))
+
+
+def server_lines(host):
+    from backend.naming import servers
+
+    return [
+        f'    server {name} {address(s.address, s.port)} weight {s.weight} check{backend_tls(s)}'
+        for name, s in zip(servers(host), host.servers)
+    ]
+
+
+def host_backend(host, mode_line=True):
+    from backend.naming import backend, backend_comment
+
+    return (
+        ([backend_comment(host)] if host.name else [])
+        + [f'backend {backend(host)}']
+        + (['    mode http'] if mode_line else [])
+        + [f'    balance {host.balance}']
+        + ['    ' + line for line in host.proxy_options]
+        + server_lines(host)
+    )
 
 
 def host_order(host):
@@ -37,6 +91,10 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
     from backend.managed_proxy import enhance
     from backend.access_control import inject as restrict
     from backend.managed_rules import inject as apply_rules
+
+    if any(h.name is None for h in doc.hosts):
+        # Hosts assigned after validation still need their readable names.
+        doc = Document.model_validate(doc.model_dump())
 
     def finish(config):
         if doc.removed_frontends:
@@ -81,25 +139,18 @@ def generate(doc: Document, capabilities: dict, basic_auth=None) -> str:
         out += ['    acl acme_challenge path_beg /.well-known/acme-challenge/']
     hosts = sorted((h for h in doc.hosts if h.enabled and h.frontend == 'public_http'), key=host_order)
     for host in hosts:
-        out += host_acl(host) + [f'    acl path_{host.id} path_beg {host.path}']
-        if host.force_https:
-            out += [
-                f'    http-request redirect scheme https code 301 if host_{host.id} path_{host.id} !{{ ssl_fc }}'
-                + (' !acme_challenge' if doc.acme_enabled else '')
-            ]
+        out += site_rules(host, doc.acme_enabled)
     if doc.acme_enabled:
         out += ['    use_backend acme_webroot if acme_challenge']
-    for host in hosts:
-        out += [f'    use_backend backend_{host.id} if host_{host.id} path_{host.id}']
+    if hosts:
+        out += ['    ' + MARKER + 'Weiterleitung an die Backends']
+    out += [route(host) for host in hosts]
     out += ['    default_backend unknown_host', '', 'backend unknown_host', '    http-request deny deny_status 404']
     if doc.acme_enabled:
         out += ['', 'backend acme_webroot', f'    server acme {address(doc.acme_address, doc.acme_port)}']
     for host in (h for h in doc.hosts if h.enabled):
-        out += ['', f'backend backend_{host.id}', '    mode http', f'    balance {host.balance}']
-        out += ['    ' + line for line in host.proxy_options]
-        for i, server in enumerate(host.servers):
-            tls = backend_tls(server)
-            out += [f'    server srv_{i + 1} {address(server.address, server.port)} weight {server.weight} check{tls}']
+        # defaults already sets mode http
+        out += [''] + host_backend(host, mode_line=not host.name)
     from backend.frontend_delete import remove_sections as remove_frontends
 
     config = remove_frontends('\n'.join(out) + '\n', doc.removed_frontends)

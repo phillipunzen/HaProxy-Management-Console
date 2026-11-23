@@ -7,6 +7,7 @@ from backend.generator import generate
 from backend.haproxy_config import import_config
 from backend.proxy_health import build, pool_health, target
 from backend.schemas import Document
+from backend import naming
 from tests.test_config_import import CONFIG, EXTRA, MAPS
 
 CAP = {'runtime_socket_config': '/run/admin.sock', 'cert_dir_config': '/etc/certs'}
@@ -30,13 +31,16 @@ def document():
 
 
 def runtime(statuses=('UP', 'UP')):
+    host = document().hosts[0]
+    assert naming.backend(host) == 'app_example_com_api'
+    servers = naming.servers(host)
     return {
         'online': True,
         'rows': [{'pxname': 'public_http', 'svname': 'FRONTEND', 'type': '0', 'status': 'OPEN'}]
         + [
             {
-                'pxname': 'backend_app',
-                'svname': f'srv_{n + 1}',
+                'pxname': naming.backend(host),
+                'svname': servers[n],
                 'type': '2',
                 'status': status,
                 'weight': '1',
