@@ -88,6 +88,8 @@ export type Doc = ImportedFields & {
 export type Cert = Certificate;
 export type Revision = { id: number; status: string; message: string; author: string; created_at: string };
 export type Cap = {
+  /** Agent can test backend targets and domains (check-targets / check-sites). */
+  probes?: boolean;
   certificate_delete?: boolean;
   tls_site_bindings?: boolean;
   certificate_management?: boolean;
@@ -148,6 +150,16 @@ export type DiffLine = {
   text: string;
   old: number | null;
   new: number | null;
+};
+export type SiteCheck = {
+  kind: string;
+  key: string;
+  label: string;
+  state: 'ok' | 'warning' | 'error' | 'skipped';
+  message: string;
+  status?: number | null;
+  ms?: number | null;
+  url?: string;
 };
 export type ApplyPreview = {
   source: 'draft' | 'text';

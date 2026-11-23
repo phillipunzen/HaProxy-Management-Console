@@ -6,6 +6,7 @@ import {
   FileClock,
   FileCode2,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   Square,
 } from 'lucide-react';
@@ -177,7 +178,10 @@ export function ConfigView({ app }: AppProps) {
         <div className="panel-header">
           <div>
             <h2>Versionshistorie</h2>
-            <p>Für einen Rollback eine vorherige Version als neuen Entwurf laden.</p>
+            <p>
+              „Wiederherstellen“ zeigt den Unterschied zur aktiven Konfiguration und spielt die Version nach
+              Bestätigung ein. „Als Entwurf laden“ öffnet sie zum Bearbeiten im Editor.
+            </p>
           </div>
           <FileClock size={19} />
         </div>
@@ -225,7 +229,24 @@ export function ConfigView({ app }: AppProps) {
                         )[r.status] || r.status}
                       </Badge>
                     </td>
-                    <td>
+                    <td className="row-actions">
+                      <button
+                        className="text-button"
+                        disabled={busy || !resourceReady || !hash}
+                        title="Unterschied zur aktiven Konfiguration ansehen und diese Version anwenden"
+                        onClick={() =>
+                          run(async () => {
+                            const old = await api(`/instances/${selected}/revisions/${r.id}`);
+                            openApply({
+                              config: old.config,
+                              baseHash: hash,
+                              message: 'Wiederherstellung von Version #' + r.id,
+                            });
+                          })
+                        }
+                      >
+                        <RotateCcw size={14} /> Wiederherstellen
+                      </button>
                       <button
                         className="text-button"
                         disabled={busy || !resourceReady || !hash}

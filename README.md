@@ -134,7 +134,11 @@ Fehlt die Datei-Import-Funktion, bietet der Importdialog direkt einen **Update-B
 
 Für eine neue Konfiguration ohne Import erzeugt der grafische Editor die vollständige Datei aus Hosts, Regeln und Listenern. Manuelle Einstellungen werden in diesem Modus nicht übernommen; der Anwenden-Dialog zeigt das als entfernte Zeilen. HTTPS erst einschalten, wenn im Zertifikatsverzeichnis ein gültiges Produktionszertifikat liegt. Der HAProxy-Check blockiert fehlerhafte Konfigurationen.
 
-Rollback: vorherige Version in der Historie **Als Entwurf laden**, prüfen und anwenden. Dadurch werden auch zwischenzeitliche externe Änderungen erkannt. Bei unbekanntem Status zuerst aktive Konfiguration und Dienst prüfen; nicht blind erneut anwenden.
+**Prüfungen:** Im Host-Dialog testet **Erreichbarkeit prüfen** vom HAProxy-Server aus, ob jeder Zielserver Verbindungen annimmt (bei HTTPS-Zielen inklusive TLS-Handshake). Nach dem Anwenden ruft der Agent die geänderten Domains über den lokalen HAProxy-Listener mit passendem Host-Header ab und zeigt pro Domain das Ergebnis, z. B. „Antwortet mit 200“, „Leitet weiter (301)“ oder „503 – Zielserver nicht erreichbar“. Es wird nur der Statuscode ausgewertet, keine Inhalte. Beide Prüfungen benötigen einen aktuellen Agenten (**Server → Agent aktualisieren**).
+
+**Vorlagen:** Beim Anlegen eines Proxy Hosts setzen Vorlagen passende Optionen, z. B. *Webanwendung* (X-Forwarded-For/-Proto), *WebSocket / Echtzeit* (lange offene Verbindungen), *Lange Anfragen* oder *Ziel über HTTPS*. Alles bleibt unter **Erweitert** änderbar. Der Host-Dialog zeigt außerdem den **Verlauf**: wer den Host wann gespeichert oder angewendet hat und was sich geändert hat.
+
+Rollback: in der Versionshistorie **Wiederherstellen** wählen. Der Anwenden-Dialog zeigt den Unterschied zur aktiven Konfiguration und spielt die Version nach Bestätigung ein. **Als Entwurf laden** öffnet die Version stattdessen im Editor. Dadurch werden auch zwischenzeitliche externe Änderungen erkannt. Bei unbekanntem Status zuerst aktive Konfiguration und Dienst prüfen; nicht blind erneut anwenden.
 
 ## Daten und Sicherungen
 

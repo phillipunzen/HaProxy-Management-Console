@@ -64,6 +64,7 @@ export function AppModals({ app }: AppProps) {
     commitNavigate,
     loadInstances,
     selectedRef,
+    selected,
     saveDoc,
     saveImportedFields,
     modalRequest,
@@ -120,11 +121,8 @@ export function AppModals({ app }: AppProps) {
             setApplyRequest(null);
             setModal('changes');
           }}
-          onApplied={async (result) => {
-            setModal(null);
-            setApplyRequest(null);
-            await finishApply(applyRequest.id, view, result);
-          }}
+          canCheckSites={!!cap?.probes && applyRequest.id === selected}
+          onApplied={(result) => finishApply(applyRequest.id, view, result)}
         />
       )}
       {modal === 'instance' && !instanceEdit && (
@@ -345,6 +343,7 @@ export function AppModals({ app }: AppProps) {
       )}
       {modal === 'host' && (
         <HostForm
+          instanceId={selected}
           manualSections={manualAccess}
           profiles={doc.access_profiles || []}
           doc={doc}

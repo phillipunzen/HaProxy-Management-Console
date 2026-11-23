@@ -5,12 +5,19 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  MinusCircle,
   XCircle,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { Button, Modal } from '../components/ui';
-import { type ApplyPreview, type ApplyRequest, type Instance, type PendingChange } from '../types';
+import {
+  type ApplyPreview,
+  type ApplyRequest,
+  type Instance,
+  type PendingChange,
+  type SiteCheck,
+} from '../types';
 import { ChangeIcon } from './ChangesDialog';
 
 /** Short default note from the change list, e.g. "app.example.com hinzugefügt, shop_pool geändert". */
@@ -31,10 +38,14 @@ export function ApplyDialog({
   onClose,
   onApplied,
   onShowChanges,
+  canCheckSites = false,
 }: {
+  /** The agent can request the changed domains through HAProxy after the reload. */
+  canCheckSites?: boolean;
   request: ApplyRequest;
   target: Instance | undefined;
   onClose: () => void;
+  /** Refreshes the views; the dialog stays open to show the result and the site check. */
   onApplied: (result: unknown) => Promise<void>;
   /** Offered when the draft cannot be generated, so single changes can be undone. */
   onShowChanges?: () => void;
@@ -43,7 +54,10 @@ export function ApplyDialog({
     [error, setError] = useState(''),
     [message, setMessage] = useState(request.message ?? ''),
     [applying, setApplying] = useState(false),
-    [showOutput, setShowOutput] = useState(false);
+    [showOutput, setShowOutput] = useState(false),
+    [applied, setApplied] = useState(false),
+    [checks, setChecks] = useState<SiteCheck[] | null>(null),
+    [checkError, setCheckError] = useState('');
   useEffect(() => {
     let alive = true;
     api<ApplyPreview>(
@@ -80,11 +94,106 @@ export function ApplyDialog({
         document_version:
           preview.source === 'draft' ? preview.document_version : (request.documentVersion ?? null),
       });
-      await onApplied(result);
+      setApplied(true);
+      setApplying(false);
+      void onApplied(result);
+      if (canCheckSites) await checkSites();
     } catch (e) {
       setError((e as Error).message);
       setApplying(false);
     }
+  }
+  async function checkSites() {
+    setChecks(null);
+    setCheckError('');
+    // Only the changed hosts/routes; settings or text changes may affect every domain.
+    const items = (preview?.changes ?? [])
+      .filter((c) => (c.kind === 'hosts' || c.kind === 'imported_routes') && c.action !== 'removed')
+      .map((c) => ({ kind: c.kind, key: c.key }));
+    const onlyItems =
+      preview?.source === 'draft' &&
+      items.length > 0 &&
+      (preview.changes ?? []).every((c) => c.kind === 'hosts' || c.kind === 'imported_routes');
+    try {
+      const { results } = await api<{ results: SiteCheck[] }>(
+        `/instances/${request.id}/check-sites`,
+        'POST',
+        onlyItems ? { items } : {},
+      );
+      setChecks(results);
+    } catch (e) {
+      setCheckError((e as Error).message);
+    }
+  }
+  if (applied) {
+    const failed = checks?.filter((c) => c.state === 'error').length ?? 0;
+    return (
+      <Modal wide title={'Angewendet · ' + (target?.name ?? 'Server')} onClose={onClose}>
+        <div className="form-body apply-dialog">
+          <div className="apply-summary">
+            <span className="apply-check ok">
+              <CheckCircle2 size={15} /> Konfiguration angewendet, Reload bestätigt
+            </span>
+          </div>
+          {canCheckSites ? (
+            <section className="site-checks" aria-live="polite">
+              <h3>Test der Domains</h3>
+              {!checks && !checkError && (
+                <div className="apply-loading">
+                  <Loader2 size={16} className="spin" /> Domains werden über HAProxy abgerufen …
+                </div>
+              )}
+              {checkError && (
+                <div className="notice error" role="alert">
+                  <XCircle size={16} />
+                  <span>{checkError}</span>
+                </div>
+              )}
+              {checks && checks.length === 0 && <p className="apply-hint">Keine Domains zum Testen.</p>}
+              {checks && checks.length > 0 && (
+                <ul className="check-list">
+                  {checks.map((c) => (
+                    <li key={c.kind + c.key} className={c.state}>
+                      {c.state === 'ok' ? (
+                        <CheckCircle2 size={15} />
+                      ) : c.state === 'warning' ? (
+                        <AlertTriangle size={15} />
+                      ) : c.state === 'error' ? (
+                        <XCircle size={15} />
+                      ) : (
+                        <MinusCircle size={15} />
+                      )}
+                      <strong>{c.label}</strong>
+                      <span>{c.message}</span>
+                      {c.ms != null && <small>{c.ms} ms</small>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {failed > 0 && (
+                <p className="apply-hint">
+                  <AlertTriangle size={13} /> Die Konfiguration ist aktiv, aber {failed}{' '}
+                  {failed === 1 ? 'Domain antwortet' : 'Domains antworten'} nicht. Zielserver und Ports prüfen
+                  oder über die Versionshistorie zurückrollen.
+                </p>
+              )}
+            </section>
+          ) : (
+            <p className="apply-hint">
+              Nach einem Agent-Update testet die Verwaltung die geänderten Domains hier automatisch.
+            </p>
+          )}
+        </div>
+        <div className="modal-actions">
+          {canCheckSites && (checks || checkError) && (
+            <Button secondary onClick={() => void checkSites()}>
+              Erneut testen
+            </Button>
+          )}
+          <Button onClick={onClose}>Schließen</Button>
+        </div>
+      </Modal>
+    );
   }
   return (
     <Modal wide title={'Änderungen anwenden · ' + (target?.name ?? 'Server')} onClose={onClose}>

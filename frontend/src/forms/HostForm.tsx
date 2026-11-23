@@ -1,5 +1,16 @@
-import { Check, ChevronRight, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import {
+  Activity,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  History,
+  Loader2,
+  Plus,
+  Trash2,
+  XCircle,
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { api } from '../api';
 import { AccessFilterEditor, type AccessProfile } from '../AccessProfiles';
 import { BackendTLSOptions } from '../BackendTLSOptions';
 import { BasicAuthSelector, type BasicGroup } from '../BasicAuth';
@@ -8,7 +19,7 @@ import { HostnameAliases } from '../Hostnames';
 import { type Layout } from '../ProxyLayout';
 import { ProxyOptions } from '../ProxyOptions';
 import { Button, Field, Modal } from '../components/ui';
-import { hostBackend, uid } from '../format';
+import { date, hostBackend, uid } from '../format';
 import { type Host, type Doc, type Cert } from '../types';
 
 /** True if a certificate's domains cover the host name (exact or single-level wildcard). */
@@ -26,7 +37,69 @@ export function certificateCovers(cert: Cert, name: string) {
   });
 }
 
+type TargetResult = { ok: boolean; ms?: number; error?: string };
+type HistoryEntry = {
+  at: string;
+  actor: string;
+  event: 'saved' | 'applied';
+  action: 'added' | 'changed' | 'removed';
+  fields: string[];
+};
+
+/** Starting points for new hosts; everything stays editable under "Erweitert". */
+const TEMPLATES: { key: string; label: string; hint: string; apply: (h: Host) => Host }[] = [
+  {
+    key: 'plain',
+    label: 'Standard',
+    hint: 'Leitet Anfragen unverändert weiter.',
+    apply: (h) => ({ ...h, proxy_options: [] }),
+  },
+  {
+    key: 'webapp',
+    label: 'Webanwendung',
+    hint: 'Übergibt Client-IP und Protokoll (X-Forwarded-For/-Proto), z. B. für Nextcloud oder WordPress.',
+    apply: (h) => ({
+      ...h,
+      proxy_options: ['option forwardfor', 'http-request set-header X-Forwarded-Proto https if { ssl_fc }'],
+    }),
+  },
+  {
+    key: 'websocket',
+    label: 'WebSocket / Echtzeit',
+    hint: 'Wie Webanwendung, hält offene Verbindungen bis zu einer Stunde (Chat, Dashboards, Home Assistant).',
+    apply: (h) => ({
+      ...h,
+      proxy_options: [
+        'option forwardfor',
+        'http-request set-header X-Forwarded-Proto https if { ssl_fc }',
+        'timeout tunnel 1h',
+      ],
+    }),
+  },
+  {
+    key: 'slow',
+    label: 'Lange Anfragen',
+    hint: 'Wartet bis zu 5 Minuten auf die Antwort, z. B. für Uploads, Exporte oder Berichte.',
+    apply: (h) => ({ ...h, proxy_options: ['option forwardfor', 'timeout server 5m'] }),
+  },
+  {
+    key: 'https-target',
+    label: 'Ziel über HTTPS',
+    hint: 'Die Anwendung erwartet selbst HTTPS (Port 443) mit gültigem Zertifikat.',
+    apply: (h) => ({
+      ...h,
+      servers: h.servers.map((s) => ({
+        ...s,
+        port: s.port === 80 ? 443 : s.port,
+        tls: true,
+        tls_verify: true,
+      })),
+    }),
+  },
+];
+
 export function HostForm({
+  instanceId,
   manualSections,
   profiles,
   doc,
@@ -38,6 +111,8 @@ export function HostForm({
   onClose,
   onSave,
 }: {
+  /** Server whose agent checks the targets; omitted in tests or without a selection. */
+  instanceId?: number | null;
   manualSections: Set<string>;
   profiles: AccessProfile[];
   doc: Doc;
@@ -74,7 +149,43 @@ export function HostForm({
     ),
     [error, setError] = useState(''),
     [certTouched, setCertTouched] = useState(!!initial),
-    [advanced, setAdvanced] = useState(false);
+    [advanced, setAdvanced] = useState(false),
+    [template, setTemplate] = useState('plain'),
+    [checks, setChecks] = useState<(TargetResult | null)[] | null>(null),
+    [checking, setChecking] = useState(false),
+    [checkError, setCheckError] = useState(''),
+    [history, setHistory] = useState<HistoryEntry[] | null>(null);
+  useEffect(() => {
+    if (!initial || !instanceId) return;
+    let alive = true;
+    api<HistoryEntry[]>(`/instances/${instanceId}/history/hosts/${encodeURIComponent(initial.id)}`)
+      .then((h) => alive && setHistory(h))
+      .catch(() => alive && setHistory([]));
+    return () => {
+      alive = false;
+    };
+  }, [initial, instanceId]);
+  const servers = v.servers;
+  useEffect(() => setChecks(null), [servers]);
+  async function checkTargets() {
+    if (!instanceId) return;
+    setChecking(true);
+    setCheckError('');
+    try {
+      const filled = v.servers.filter((s) => s.address.trim());
+      const { results } = await api<{ results: TargetResult[] }>(
+        `/instances/${instanceId}/check-targets`,
+        'POST',
+        { targets: filled.map((s) => ({ address: s.address.trim(), port: s.port, tls: !!s.tls })) },
+      );
+      let n = 0;
+      setChecks(v.servers.map((s) => (s.address.trim() ? results[n++] : null)));
+    } catch (e) {
+      setCheckError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
   const usable = certs.filter((c) => !c.staging && !c.error);
   const setDomain = (domain: string) => {
     // Suggest a matching certificate (and HTTPS redirect) until the user picks one.
@@ -138,9 +249,56 @@ export function HostForm({
             />
           </Field>
         </div>
+        {!initial && (
+          <div className="template-picker" role="radiogroup" aria-label="Vorlage">
+            <span className="template-label">Vorlage</span>
+            {TEMPLATES.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="radio"
+                aria-checked={template === t.key}
+                className={'chip' + (template === t.key ? ' active' : '')}
+                title={t.hint}
+                onClick={() => {
+                  const base = TEMPLATES.find((x) => x.key === template);
+                  // Undo the previous template's server change before applying the next one.
+                  const reset =
+                    base?.key === 'https-target'
+                      ? {
+                          ...v,
+                          servers: v.servers.map((s) => ({
+                            ...s,
+                            port: s.port === 443 ? 80 : s.port,
+                            tls: false,
+                          })),
+                        }
+                      : v;
+                  setTemplate(t.key);
+                  setV(t.apply(reset));
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+            <small className="field-note">{TEMPLATES.find((t) => t.key === template)?.hint}</small>
+          </div>
+        )}
         <HostnameAliases value={v.aliases} wildcards onChange={(aliases) => setV({ ...v, aliases })} />
         <div className="form-section-title">
           <h3>Ziel</h3>
+          {instanceId && (
+            <button
+              className="text-button"
+              type="button"
+              disabled={checking || !v.servers.some((s) => s.address.trim())}
+              title="Der Agent auf dem HAProxy-Server baut eine Verbindung zu jedem Zielserver auf."
+              onClick={() => void checkTargets()}
+            >
+              {checking ? <Loader2 size={14} className="spin" /> : <Activity size={14} />}
+              Erreichbarkeit prüfen
+            </button>
+          )}
           <button
             className="text-button"
             type="button"
@@ -152,8 +310,22 @@ export function HostForm({
             Weiteren Zielserver
           </button>
         </div>
+        {checkError && (
+          <div className="notice error" role="alert">
+            <XCircle size={16} />
+            <span>{checkError}</span>
+          </div>
+        )}
         {v.servers.map((s, i) => (
           <div key={i} className={'backend-form' + (v.servers.length > 1 ? '' : ' single')}>
+            {checks?.[i] && (
+              <span className={'target-check ' + (checks[i].ok ? 'ok' : 'bad')} role="status">
+                {checks[i].ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                {checks[i].ok
+                  ? `Erreichbar (${checks[i].ms} ms)`
+                  : `Nicht erreichbar: ${checks[i].error ?? 'unbekannter Fehler'}`}
+              </span>
+            )}
             <Field label="IP / Hostname">
               <input
                 required
@@ -336,6 +508,29 @@ export function HostForm({
             onForward={(forward) => setV({ ...v, basic_auth_forward: forward })}
           />
         </div>
+        {initial && history && history.length > 0 && (
+          <details className="host-history">
+            <summary>
+              <History size={14} /> Verlauf ({history.length})
+            </summary>
+            <ul>
+              {history.map((h, n) => (
+                <li key={n}>
+                  <span className={'history-event ' + h.event}>
+                    {h.event === 'applied' ? 'Angewendet' : 'Gespeichert'}
+                  </span>
+                  <span>
+                    {{ added: 'Angelegt', changed: 'Geändert', removed: 'Entfernt' }[h.action]}
+                    {h.fields.length > 0 && ': ' + h.fields.join(', ')}
+                  </span>
+                  <small>
+                    {h.actor} · {date(h.at)}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
         <div className="modal-actions">
           <Button secondary type="button" onClick={onClose}>
             Abbrechen

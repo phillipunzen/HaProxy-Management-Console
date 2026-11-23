@@ -139,3 +139,51 @@ def line_diff(old: str, new: str, context: int = 3) -> dict:
         first = group[0]
         hunks.append({'header': f'@@ -{first[1] + 1} +{first[3] + 1} @@', 'lines': lines})
     return {'hunks': hunks, 'added': added, 'removed': removed}
+
+
+FIELD_LABELS = {
+    'domain': 'Domain',
+    'aliases': 'weitere Domains',
+    'path': 'Pfad',
+    'enabled': 'Aktiv',
+    'force_https': 'HTTPS-Weiterleitung',
+    'frontend': 'Frontend',
+    'certificate': 'Zertifikat',
+    'balance': 'Verteilung',
+    'servers': 'Zielserver',
+    'basic_auth_group': 'Passwortschutz',
+    'basic_auth_forward': 'Passwortschutz',
+    'access_profile': 'IP-Filter',
+    'access_policy': 'IP-Filter',
+    'access_paths': 'IP-Filter',
+    'proxy_options': 'Proxy-Optionen',
+    'backend': 'Backend',
+    'name': None,  # derived from domain and path
+}
+
+
+def changed_fields(old: dict, new: dict) -> list[str]:
+    """Readable names of the fields that differ, e.g. ['Zielserver', 'Pfad']."""
+    labels = []
+    for key in sorted(set(old) | set(new)):
+        if old.get(key) == new.get(key):
+            continue
+        label = FIELD_LABELS.get(key, key)
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def history_entries(before: dict, after: dict) -> list[dict]:
+    """summarize() plus the changed fields, for the per-item history."""
+    entries = []
+    for change in summarize(after, before):
+        entry = dict(change)
+        if change['action'] == 'changed':
+            spec = next((c for c in COLLECTIONS if c[0] == change['kind']), None)
+            if spec:
+                old = _by_key(before.get(change['kind']), spec[1]).get(change['key'], {})
+                new = _by_key(after.get(change['kind']), spec[1]).get(change['key'], {})
+                entry['fields'] = changed_fields(old, new)
+        entries.append(entry)
+    return entries

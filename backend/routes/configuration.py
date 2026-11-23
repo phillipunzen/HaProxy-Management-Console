@@ -313,11 +313,65 @@ def save_document(id: int, body: Document, user=Depends(operator), db=Depends(ge
         raise HTTPException(404)
     if body.version != i.document_version:
         raise HTTPException(409, 'Entwurf wurde parallel geändert. Bitte neu laden.')
+    before = i.document or {}
     i.document = body.model_dump(exclude={'version'})
     i.document_version += 1
     audit(db, user.username, 'document.saved', i.name)
+    record_history(db, user.username, i.name, 'item.saved', before, i.document)
     db.commit()
     return i.document | {'version': i.document_version, 'basic_auth_existing': existing}
+
+
+HISTORY_KINDS = ('hosts', 'imported_routes', 'rules', 'backends', 'imported_backends', 'frontends')
+
+
+def record_history(db, actor, target, action, before, after):
+    """One audit row per changed item, readable as a per-host history."""
+    for entry in changes.history_entries(before, after)[:200]:
+        if entry['kind'] in HISTORY_KINDS:
+            audit(db, actor, action, target, json.dumps(entry, ensure_ascii=False, sort_keys=True))
+
+
+@router.get('/api/instances/{id}/history/{kind}/{key}')
+def item_history(id: int, kind: str, key: str, user=Depends(operator), db=Depends(get_db)):
+    """Who changed or applied a host, route or rule, newest first."""
+    from backend.db import Audit
+
+    i = instance(db, id)
+    if kind not in HISTORY_KINDS:
+        raise HTTPException(404)
+    needle = json.dumps({'key': key}, ensure_ascii=False)[1:-1]
+    rows = db.scalars(
+        select(Audit)
+        .where(
+            Audit.target == i.name,
+            Audit.action.in_(('item.saved', 'item.applied')),
+            Audit.detail.contains(needle),
+        )
+        .order_by(Audit.id.desc())
+        .limit(200)
+    )
+    result = []
+    for row in rows:
+        try:
+            entry = json.loads(row.detail)
+        except ValueError:
+            continue
+        if entry.get('kind') != kind or entry.get('key') != key:
+            continue
+        result.append(
+            {
+                'at': row.created_at.isoformat() + 'Z',
+                'actor': row.actor,
+                'event': 'applied' if row.action == 'item.applied' else 'saved',
+                'action': entry.get('action'),
+                'label': entry.get('label'),
+                'fields': entry.get('fields', []),
+            }
+        )
+        if len(result) >= 50:
+            break
+    return result
 
 
 class ProxyDeleteIn(BaseModel):
@@ -642,6 +696,8 @@ def apply_revision(
                 applied = preview['document']
             except ValueError as error:
                 sync_error = 'Grafischer Abgleich fehlgeschlagen: ' + str(error)
+    if applied is not None:
+        record_history(db, user.username, i.name, 'item.applied', i.applied_document or {}, applied)
     i.applied_document = applied
     deployment = db.get(BasicAuthDeployment, id)
     if auth_metadata or deployment:
