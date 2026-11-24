@@ -171,3 +171,35 @@ export type ApplyPreview = {
   output: string;
   changes: PendingChange[] | null;
 };
+/** GET /instances/{id}/https/{kind}/{key}: what the HTTPS assistant can do for one entry. */
+export type HttpsPlan = {
+  kind: 'hosts' | 'imported_routes';
+  key: string;
+  label: string;
+  domains: string[];
+  wildcard: boolean;
+  certificate: string | null;
+  certificate_ok: boolean;
+  redirect: boolean;
+  force_https: boolean;
+  existing: { name: string; domains: string[]; days_remaining: number | null }[];
+  challenges: {
+    http: { available: boolean; reason: string | null };
+    dns: {
+      available: boolean;
+      reason: string | null;
+      credentials: { id: string; provider: string; label: string }[];
+    };
+  };
+  enable_challenge: boolean;
+  challenge_live: boolean;
+  challenge_target: string | null;
+  enable_tls: boolean;
+  suggested_name: string;
+  suggested_email: string;
+  pending: { kind: string; key: string; action: string; label: string; type: string }[];
+  applied_known: boolean;
+  blockers: string[];
+  can_check_sites: boolean;
+  version: number;
+};

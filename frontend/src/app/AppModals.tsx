@@ -17,6 +17,7 @@ import { RuleForm } from '../forms/RuleForm';
 import { UserForm } from '../forms/UserForm';
 import { PasswordForm } from '../views/Login';
 import { ApplyDialog } from './ApplyDialog';
+import { HttpsAssistant } from '../components/HttpsAssistant';
 import { ChangesDialog } from './ChangesDialog';
 
 export function AppModals({ app }: AppProps) {
@@ -78,6 +79,11 @@ export function AppModals({ app }: AppProps) {
     openApply,
     revertChange,
     finishApply,
+    httpsTarget,
+    openHttps,
+    canEdit,
+    setChangesTick,
+    loadResource,
     instances,
     current,
     view,
@@ -123,6 +129,21 @@ export function AppModals({ app }: AppProps) {
           }}
           canCheckSites={!!cap?.probes && applyRequest.id === selected}
           onApplied={(result) => finishApply(applyRequest.id, view, result)}
+        />
+      )}
+      {modal === 'https' && httpsTarget && modalTarget && (
+        <HttpsAssistant
+          instanceId={modalTarget.id}
+          target={httpsTarget}
+          onClose={() => setModal(null)}
+          onChanged={async (result) => {
+            const id = modalTarget.id;
+            if (selectedRef.current !== id) return;
+            setChangesTick((t) => t + 1);
+            setCerts(await api(`/instances/${id}/certificates`));
+            await loadResource(id, view);
+            if (result) await loadInstances();
+          }}
         />
       )}
       {modal === 'instance' && !instanceEdit && (
@@ -352,6 +373,7 @@ export function AppModals({ app }: AppProps) {
           groups={authDirectory?.groups || []}
           initial={hostEdit}
           busy={busy}
+          onHttps={canEdit && hostEdit ? () => openHttps({ kind: 'hosts', key: hostEdit.id }) : undefined}
           onClose={() => setModal(null)}
           onSave={(value, profiles) =>
             controlledSave(async () => {

@@ -10,6 +10,7 @@ import { useProxyHealth } from '../ProxyHealth';
 import { type Frontend, type Pool, type Layout } from '../ProxyLayout';
 import { manualAccessSections, summarizeAccess, type AccessFilter } from '../accessVisibility';
 import { api, setCsrf } from '../api';
+import { type HttpsTarget } from '../components/HttpsAssistant';
 import { defaultDoc } from './constants';
 import {
   type User,
@@ -80,7 +81,8 @@ export function useAppState() {
   const [authDirectory, setAuthDirectory] = useState<BasicDirectory | null>(null);
   const [changes, setChanges] = useState<PendingChanges | null>(null),
     [changesTick, setChangesTick] = useState(0),
-    [applyRequest, setApplyRequest] = useState<ApplyRequest | null>(null);
+    [applyRequest, setApplyRequest] = useState<ApplyRequest | null>(null),
+    [httpsTarget, setHttpsTarget] = useState<HttpsTarget | null>(null);
   const [topologyRefresh, setTopologyRefresh] = useState(0);
   const [updateCommand, setUpdateCommand] = useState(''),
     [metricStorage, setMetricStorage] = useState<MetricStorage | null>(null);
@@ -130,6 +132,7 @@ export function useAppState() {
         'import',
         'imported-backend',
         'imported-route',
+        'https',
       ].includes(value)
     ) {
       if (!resourceReady || !current) return;
@@ -499,6 +502,11 @@ export function useAppState() {
       notify(success + ' Die Ansicht konnte noch nicht aktualisiert werden: ' + (e as Error).message, true);
     }
   }
+  /** Opens the HTTPS assistant for one proxy host or imported domain. */
+  function openHttps(target: HttpsTarget) {
+    setHttpsTarget(target);
+    setModal('https');
+  }
   /** Opens the single apply dialog (diff, validation, note) for the draft or a text config. */
   function openApply(request: Partial<ApplyRequest> = {}) {
     const id = request.id ?? selected;
@@ -801,6 +809,8 @@ export function useAppState() {
     setConfirmState,
     hostEdit,
     setHostEdit,
+    httpsTarget,
+    openHttps,
     ruleEdit,
     setRuleEdit,
     instanceEdit,

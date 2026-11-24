@@ -5,6 +5,7 @@ import {
   ChevronRight,
   History,
   Loader2,
+  LockKeyhole,
   Plus,
   Trash2,
   XCircle,
@@ -110,7 +111,10 @@ export function HostForm({
   busy,
   onClose,
   onSave,
+  onHttps,
 }: {
+  /** Opens the HTTPS assistant for this saved host (closes the form). */
+  onHttps?: () => void;
   /** Server whose agent checks the targets; omitted in tests or without a selection. */
   instanceId?: number | null;
   manualSections: Set<string>;
@@ -401,6 +405,28 @@ export function HostForm({
         <div className="form-section-title">
           <h3>HTTPS</h3>
         </div>
+        {onHttps && initial && !(initial.force_https && initial.certificate) && (
+          <div className="notice">
+            <LockKeyhole size={16} />
+            <span>
+              Noch kein eigenes Zertifikat? Der HTTPS-Assistent fordert es an, weist es zu, leitet HTTP auf
+              HTTPS weiter und wendet alles an.{' '}
+              <button
+                type="button"
+                className="text-button"
+                disabled={busy || JSON.stringify(v) !== JSON.stringify(initial)}
+                title={
+                  JSON.stringify(v) !== JSON.stringify(initial)
+                    ? 'Zuerst die Änderungen speichern oder verwerfen.'
+                    : undefined
+                }
+                onClick={onHttps}
+              >
+                HTTPS-Assistent öffnen
+              </button>
+            </span>
+          </div>
+        )}
         <CertificateSelector
           certs={certs}
           value={v.certificate}

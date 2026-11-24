@@ -13,7 +13,7 @@ from backend import basic_auth_api, infrastructures
 from backend import migrations as database_migrations
 from backend.settings import settings
 from backend.core import APP_VERSION, AgentUpdateRequired, admin, audit, current_user, operator, ph
-from backend.routes import auth, agents, instances, configuration, monitoring, certificates, checks
+from backend.routes import auth, agents, instances, configuration, monitoring, certificates, checks, https
 
 # Re-exported for scripts and tests that address the application module directly.
 import httpx  # noqa: F401,E402
@@ -64,7 +64,7 @@ async def validation_error(request, error):
 
 app.include_router(basic_auth_api.router(admin, operator, audit))
 app.include_router(infrastructures.router(current_user, admin, audit))
-for module in (auth, agents, instances, configuration, monitoring, certificates, checks):
+for module in (auth, agents, instances, configuration, monitoring, certificates, checks, https):
     app.include_router(module.router)
 collect_metrics = monitoring.collect_metrics  # used by tests and scripts
 

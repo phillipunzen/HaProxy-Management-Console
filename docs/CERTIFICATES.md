@@ -2,6 +2,10 @@
 
 Zuerst den Zielserver bzw. seine Infrastruktur auswählen. Zertifikate und Aufträge gehören ausschließlich zu diesem Agent-Profil. Private Schlüssel und DNS-Zugangsdaten bleiben auf dem HAProxy-Host.
 
+## Schnellster Weg: HTTPS-Assistent
+
+Für einen einzelnen Proxy Host oder eine übernommene Domain in der Host-Liste das Schloss-Symbol wählen. Der Assistent erledigt die folgenden Schritte in einem Durchgang: Challenge-Weiterleitung einschalten (nur bei HTTP-Challenge in nativen Konfigurationen), Zertifikat anfordern, zuweisen, HTTP auf HTTPS weiterleiten, anwenden und testen. Für die DNS-Challenge muss auf diesem Server bereits ein DNS-Zugang gespeichert sein. Dazu einmal wie unten beschrieben ein Zertifikat mit API-Token anfordern. Sammelzertifikate und Frontend-Zuweisungen weiterhin wie unten beschrieben einrichten.
+
 ## Zertifikat anfordern: HTTP oder DNS
 
 1. Zielserver auswählen und **Zertifikate → Zertifikat anfordern** öffnen.

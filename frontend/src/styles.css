@@ -3607,3 +3607,108 @@ select {
 .checklist li.next strong {
   color: var(--accent-strong);
 }
+
+/* ── HTTPS assistant ───────────────────────────────────────────── */
+.notice.warning {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+.assistant-intro {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.assistant-choice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px 10px;
+  margin: 0 0 12px;
+}
+.assistant-choice legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+  color: var(--text-muted);
+}
+.radio-row,
+.check-row {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 5px 0;
+  font-size: 13px;
+  cursor: pointer;
+}
+.radio-row input,
+.check-row input {
+  accent-color: var(--primary);
+  margin: 3px 0 0;
+}
+.radio-row small,
+.check-row small {
+  display: block;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.radio-row.disabled {
+  cursor: not-allowed;
+  color: var(--text-muted);
+}
+.check-row {
+  margin: 0 0 12px;
+}
+.assistant-preview {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.assistant-preview h3 {
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+.assistant-preview ol {
+  margin: 0 0 6px;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.assistant-preview small {
+  color: var(--text-faint);
+}
+.assistant-steps {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+}
+.assistant-steps li {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.assistant-steps li:last-child {
+  border-bottom: 0;
+}
+.assistant-steps li > svg {
+  margin-top: 2px;
+}
+.assistant-steps small {
+  display: block;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+.assistant-steps li.pending,
+.assistant-steps li.skipped {
+  color: var(--text-muted);
+}
+.assistant-steps li.done > svg {
+  color: var(--success);
+}
+.assistant-steps li.error > svg,
+.assistant-steps li.error small {
+  color: var(--danger);
+}

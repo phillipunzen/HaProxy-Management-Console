@@ -18,7 +18,7 @@ function hiddenIds(): number[] {
  * is done (or it is hidden for this server in this browser).
  */
 export function SetupChecklist({ app }: AppProps) {
-  const { current, online, doc, revisions, changes, canEdit, navigate, setModal, openApply } = app;
+  const { current, online, doc, revisions, changes, canEdit, navigate, setModal, openApply, openHttps } = app;
   const [hidden, setHidden] = useState(hiddenIds);
   if (!current || !doc || !canEdit || hidden.includes(current.id)) return null;
   const sites = doc.hosts.length + (doc.imported_routes?.length ?? 0);
@@ -49,8 +49,14 @@ export function SetupChecklist({ app }: AppProps) {
     {
       label: 'HTTPS aktiv',
       done: https,
-      hint: 'Zertifikat anfordern und einer Domain zuweisen.',
-      action: () => navigate('certificates'),
+      hint: 'Der HTTPS-Assistent fordert das Zertifikat an, weist es zu und wendet alles an.',
+      action: () => {
+        const host = doc.hosts.find((h) => h.enabled && !h.certificate);
+        const route = (doc.imported_routes ?? []).find((r) => !r.certificate);
+        if (host) openHttps({ kind: 'hosts', key: host.id });
+        else if (route) openHttps({ kind: 'imported_routes', key: route.id });
+        else navigate('certificates');
+      },
     },
     {
       label: 'Alles angewendet',
