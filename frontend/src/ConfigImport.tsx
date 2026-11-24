@@ -20,6 +20,7 @@ import {
   Terminal,
   Copy,
   RefreshCw,
+  LockKeyhole,
 } from 'lucide-react';
 
 export type ImportedBackend = {
@@ -460,8 +461,11 @@ export function ImportedConfigPanel({
   onEditBackend,
   onEditRoute,
   onRemoveBackend,
+  onHttps,
   busy,
 }: {
+  /** Opens the HTTPS assistant for a domain without its own certificate. */
+  onHttps?: (route: ImportedRoute) => void;
   visibleRoute?: (route: ImportedRoute) => boolean;
   accessSummaries?: Record<string, AccessSummary>;
   health: HealthView;
@@ -590,6 +594,17 @@ export function ImportedConfigPanel({
                       <ProxyHealthCell view={health} kind="routes" id={r.id} />
                     </td>
                     <td>
+                      {onHttps && !r.certificate && (
+                        <button
+                          className="icon-button"
+                          disabled={locked}
+                          title="HTTPS einrichten"
+                          aria-label={'HTTPS für ' + r.domain + ' einrichten'}
+                          onClick={() => onHttps(r)}
+                        >
+                          <LockKeyhole size={16} />
+                        </button>
+                      )}
                       <button
                         className="icon-button"
                         disabled={locked}

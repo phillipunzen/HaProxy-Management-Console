@@ -33,6 +33,8 @@ export function HostsView({ app }: AppProps) {
     routeAccess,
     visibleRoute,
     filteredHosts,
+    openHttps,
+    canEdit,
   } = app;
   if (!selected) return null;
   return (
@@ -85,6 +87,7 @@ export function HostsView({ app }: AppProps) {
             setModal('imported-route');
           }}
           onImport={() => setModal('import')}
+          onHttps={canEdit ? (route) => openHttps({ kind: 'imported_routes', key: route.id }) : undefined}
         />
       )}
       <section className="panel">
@@ -161,6 +164,17 @@ export function HostsView({ app }: AppProps) {
                     </td>
                     <td>
                       <div className="row-actions">
+                        {canEdit && !(h.force_https && h.certificate) && (
+                          <button
+                            className="icon-button"
+                            title="HTTPS einrichten"
+                            aria-label={'HTTPS für ' + h.domain + ' einrichten'}
+                            disabled={!resourceReady}
+                            onClick={() => openHttps({ kind: 'hosts', key: h.id })}
+                          >
+                            <LockKeyhole size={16} />
+                          </button>
+                        )}
                         <button
                           className="icon-button"
                           title="Bearbeiten"
