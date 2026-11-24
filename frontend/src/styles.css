@@ -3420,3 +3420,190 @@ select {
   color: var(--text-faint);
   font-style: italic;
 }
+
+/* ── Host templates, target check and history ─────────────────── */
+.template-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.template-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-right: 4px;
+}
+.chip {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--hover);
+}
+.chip.active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.template-picker .field-note {
+  flex-basis: 100%;
+}
+.target-check {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.target-check.ok {
+  color: var(--success);
+}
+.target-check.bad {
+  color: var(--danger);
+}
+.host-history {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  font-size: 12px;
+}
+.host-history summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.host-history ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow: auto;
+}
+.host-history li {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.host-history small {
+  color: var(--text-faint);
+}
+.history-event {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.history-event.applied {
+  color: var(--success);
+}
+
+/* ── Post-apply site check ─────────────────────────────────────── */
+.site-checks h3 {
+  font-size: 13px;
+  margin: 12px 0 6px;
+}
+.check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.check-list li {
+  display: grid;
+  grid-template-columns: 18px minmax(120px, auto) 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.check-list li:last-child {
+  border-bottom: 0;
+}
+.check-list li.ok svg {
+  color: var(--success);
+}
+.check-list li.warning svg {
+  color: var(--warning);
+}
+.check-list li.error svg {
+  color: var(--danger);
+}
+.check-list li.skipped {
+  color: var(--text-muted);
+}
+.check-list small {
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+@media (max-width: 640px) {
+  .check-list li {
+    grid-template-columns: 18px 1fr;
+  }
+  .check-list li > span,
+  .check-list li > small {
+    grid-column: 2;
+  }
+  .host-history li {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Setup checklist ───────────────────────────────────────────── */
+.setup-checklist {
+  margin-bottom: 16px;
+}
+.setup-checklist h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.checklist-progress {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 0 16px 8px;
+  overflow: hidden;
+}
+.checklist-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 12px;
+}
+.checklist li {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.checklist li > div {
+  display: flex;
+  flex-direction: column;
+}
+.checklist li small {
+  color: var(--text-muted);
+}
+.checklist li.done {
+  color: var(--text-muted);
+}
+.checklist li.done svg {
+  color: var(--success);
+}
+.checklist li.next strong {
+  color: var(--accent-strong);
+}

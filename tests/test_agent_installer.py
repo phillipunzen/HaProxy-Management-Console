@@ -219,7 +219,8 @@ def test_archive_installer_includes_proxy_option_schema_dependency(tmp_path):
         [
             sys.executable,
             '-c',
-            "from backend.schemas import Host; h=Host(id='app',domain='app.example.com',servers=[{'address':'127.0.0.1'}],proxy_options=['http-request set-path /reset-password%[path]']); assert len(h.proxy_options)==1",
+            # The agent must start from exactly the files the installer extracts.
+            "import agent.main; from backend.schemas import Document, Host; Document.model_validate({'hosts': [{'id': 'a', 'domain': 'a.example.com', 'servers': [{'address': '127.0.0.1'}]}]}); h=Host(id='app',domain='app.example.com',servers=[{'address':'127.0.0.1'}],proxy_options=['http-request set-path /reset-password%[path]']); assert len(h.proxy_options)==1",
         ],
         cwd=tmp_path,
         env=dict(os.environ, PYTHONPATH=str(tmp_path)),

@@ -35,6 +35,7 @@ from agent import certificates as certificate_jobs
 from backend.haproxy_config import migration_context
 from agent.config_bundle import read_bundle
 from agent.tls_bindings import materialize as tls_files
+from agent import probes
 
 CONFIG_PATH = Path(os.environ.get('AGENT_CONFIG', '/etc/haproxy-control/agent.json'))
 PROFILES = {}
@@ -443,6 +444,7 @@ def capabilities(profile: str, p=Depends(auth)):
         'acme_engines': ['certbot'] + (['lego'] if certificate_jobs.lego_ready(p) else []),
         'config_bundle': True,
         'token_rotation': True,
+        'probes': True,
         'certificate_scope_error': certificate_scope_error(p),
     }
 
@@ -469,6 +471,18 @@ def rotate_token(profile: str, body: TokenIn, p=Depends(auth)):
         p['token'] = body.token
     logger.warning('Agent token for profile %s was rotated', profile)
     return {'ok': True}
+
+
+@app.post('/profiles/{profile}/probe/targets')
+def probe_targets(profile: str, body: probes.TargetsIn, p=Depends(auth)):
+    """TCP/TLS reachability of backend servers as seen from the HAProxy host."""
+    return {'results': probes.run(probes.check_target, body.targets)}
+
+
+@app.post('/profiles/{profile}/probe/sites')
+def probe_sites(profile: str, body: probes.SitesIn, p=Depends(auth)):
+    """One request per domain through the local HAProxy listener (status code only)."""
+    return {'results': probes.run(probes.check_site, body.sites)}
 
 
 @app.get('/profiles/{profile}/config-bundle')

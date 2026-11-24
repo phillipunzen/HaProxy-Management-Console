@@ -36,6 +36,7 @@ files = {
     'backend/haproxy_config.py': root / 'backend' / 'haproxy_config.py',
     'backend/basic_auth.py': root / 'backend' / 'basic_auth.py',
     'backend/tls_bindings.py': root / 'backend' / 'tls_bindings.py',
+    'backend/naming.py': root / 'backend' / 'naming.py',
 }
 for name in (
     '__init__.py',
@@ -45,6 +46,7 @@ for name in (
     'tls_bindings.py',
     'config_bundle.py',
     'setup_checks.py',
+    'probes.py',
     'config.example.json',
     'haproxy-control-agent.service',
     'haproxy-control-webroot.service',

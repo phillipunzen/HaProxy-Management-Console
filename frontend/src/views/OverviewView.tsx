@@ -12,6 +12,7 @@ import {
 import { type AppProps } from '../app/useAppState';
 import { Chart, MetricCard } from '../components/Charts';
 import { ServerTable } from '../components/ServerTable';
+import { SetupChecklist } from '../components/SetupChecklist';
 import { Button, Badge, Empty } from '../components/ui';
 import { fmt, bytes } from '../format';
 
@@ -32,6 +33,7 @@ export function OverviewView({ app }: AppProps) {
   } = app;
   return (
     <>
+      <SetupChecklist app={app} />
       <div className="metrics-grid">
         <MetricCard
           label="Erreichbare Server"
